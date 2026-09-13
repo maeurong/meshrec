@@ -100,11 +100,11 @@ def test_il_dialogo_distingue_chi_ha_chiuso_meshrec(tmp_path):
     c'entrava. Segnale mandato da fuori, crash e errore del programma sono tre
     cose diverse, e il dialogo le dice diverse."""
     casi = {
-        143: "chiuso da un altro processo",
+        143: "puoi riaprirlo normalmente",
         137: "chiuso da un altro processo",
         129: "chiuso da un altro processo",
-        139: "si è interrotto di colpo",
-        134: "si è interrotto di colpo",
+        139: "si è chiuso di colpo per un errore interno",
+        134: "si è chiuso di colpo per un errore interno",
         1: "si è fermato con un errore",
     }
     for codice, attesa in casi.items():

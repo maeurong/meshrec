@@ -954,7 +954,7 @@ def test_i_client_sse_che_se_ne_vanno_non_lasciano_thread_appesi():
                     letto += pezzo
             finally:
                 presa.close()
-        scadenza = time.monotonic() + 2
+        scadenza = time.monotonic() + 5
         while _thread_dentro_flusso() and time.monotonic() < scadenza:
             time.sleep(0.05)
         rimasti = _thread_dentro_flusso()

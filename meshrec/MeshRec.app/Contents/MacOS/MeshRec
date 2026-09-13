@@ -30,8 +30,8 @@ codice=$?
 if [ "$codice" -ne 0 ]; then
     echo "MeshRec uscito con codice $codice" >>"$LOG"
     case "$codice" in
-        129|137|143) motivo="MeshRec è stato chiuso da un altro processo (codice $codice), non da un errore del programma." ;;
-        134|139) motivo="MeshRec si è interrotto di colpo (codice $codice)." ;;
+        129|137|143) motivo="MeshRec è stato chiuso da un altro processo (codice $codice), non da un errore del programma: puoi riaprirlo normalmente." ;;
+        134|139) motivo="MeshRec si è chiuso di colpo per un errore interno (codice $codice)." ;;
         *) motivo="MeshRec si è fermato con un errore (codice $codice)." ;;
     esac
     osascript -e "display dialog \"$motivo Le ultime righe sono in:\n$LOG\" with title \"MeshRec\" buttons {\"OK\"} default button 1 with icon stop"
