@@ -859,3 +859,85 @@ def test_la_configurazione_non_esporta_piu_i_simboli_dell_analisi():
     assert not hasattr(config, "AnalysisConfig")
     assert not hasattr(config, "GRAVITY_MM_S2")
     assert not hasattr(config.PipelineConfig, "analisi_dichiarata")
+
+
+# Percorsi fra Windows e macOS (13/09/2026). Mario apre le stesse corse sulle due
+# macchine: un `\` scritto da Windows, su macOS, e' un carattere del nome.
+
+
+@pytest.mark.parametrize(
+    ("scritto", "atteso"),
+    [
+        (r"runs\geoandgeo\01_cloud.ply", "runs/geoandgeo/01_cloud.ply"),
+        (r"runs\città vecchia\nuvola 01.ply", "runs/città vecchia/nuvola 01.ply"),
+        (r"C:\Users\mario\nuvola.ply", "C:/Users/mario/nuvola.ply"),
+    ],
+)
+def test_la_configurazione_salvata_non_porta_separatori_di_windows(tmp_path, scritto, atteso):
+    from pathlib import PureWindowsPath
+
+    for valore in (scritto, PureWindowsPath(scritto)):
+        cfg = PipelineConfig(
+            input=config.InputConfig(path=valore),
+            run=config.RunConfig(out_dir=type(valore)(r"runs\città vecchia")),
+        )
+        percorso = tmp_path / "config.yaml"
+        config.save_config(cfg, percorso)
+
+        testo = percorso.read_text(encoding="utf-8")
+        assert "\\" not in testo
+        dati = yaml.safe_load(testo)
+        assert dati["input"]["path"] == atteso
+        assert dati["run"]["out_dir"] == "runs/città vecchia"
+
+
+def test_un_percorso_relativo_scritto_da_windows_apre_il_file_su_ogni_piattaforma(
+    tmp_path, monkeypatch
+):
+    nuvola = tmp_path / "runs" / "geoandgeo" / "01_cloud.ply"
+    nuvola.parent.mkdir(parents=True)
+    nuvola.write_text("ply\n", encoding="utf-8")
+    percorso = tmp_path / "config.yaml"
+    percorso.write_text("input:\n  path: runs\\geoandgeo\\01_cloud.ply\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = config.load_config(percorso)
+
+    assert cfg.input.path.is_file()
+    assert cfg.input.path.resolve() == nuvola.resolve()
+
+
+def test_un_percorso_assoluto_di_windows_su_un_altra_macchina_e_un_file_assente(tmp_path):
+    from meshrec.core import io
+
+    percorso = tmp_path / "config.yaml"
+    percorso.write_text("input:\n  path: C:\\Users\\mario\\nuvola.ply\n", encoding="utf-8")
+
+    cfg = config.load_config(percorso)
+
+    with pytest.raises(ValueError, match="file assente"):
+        io.read_cloud(cfg.input.path)
+
+
+def test_un_percorso_unc_resta_unc_dopo_salvataggio_e_ricarica(tmp_path):
+    from pathlib import PureWindowsPath
+
+    unc = PureWindowsPath(r"\\server\share\x.ply")
+    percorso = tmp_path / "config.yaml"
+    config.save_config(PipelineConfig(input=config.InputConfig(path=str(unc))), percorso)
+
+    riletto = PureWindowsPath(str(config.load_config(percorso).input.path))
+
+    assert riletto == unc
+    assert riletto.drive == r"\\server\share"
+
+
+def test_l_impronta_non_dipende_dal_separatore():
+    from meshrec.core import steps
+    from meshrec.core.sweep import fingerprint
+
+    windows = PipelineConfig(input=config.InputConfig(path=r"..\Nuvole di punti\muro.ply"))
+    posix = PipelineConfig(input=config.InputConfig(path="../Nuvole di punti/muro.ply"))
+
+    assert fingerprint(windows) == fingerprint(posix)
+    assert steps.step_fingerprints(windows) == steps.step_fingerprints(posix)

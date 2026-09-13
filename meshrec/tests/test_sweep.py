@@ -351,6 +351,8 @@ def test_a_candidate_whose_folder_cannot_be_created_becomes_a_row_and_not_an_exc
     assert row["outcome"] == "errore"
     assert row["stderr"]
     assert row["fingerprint"] == sweep.fingerprint(cfg)
+    # Il registro viaggia fra Windows e macOS: nessun separatore di Windows.
+    assert "\\" not in row["out_dir"]
 
 
 def _row(fingerprint_: str, thickness_error: float, tets: int, over: float, **extra):
