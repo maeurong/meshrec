@@ -154,9 +154,9 @@ def test_aprire_una_corsa_esistente_la_lega(slegato, nuvola, tmp_path):
 
     assert risposta.status_code == 200
     assert slegato.get("/api/corse").json()["corrente"] == "prima"
-    assert slegato.get("/api/config").json()["run"]["out_dir"] == str(
+    assert slegato.get("/api/config").json()["run"]["out_dir"] == (
         tmp_path / "runs" / "prima"
-    )
+    ).as_posix()
 
 
 def test_aprire_una_corsa_che_non_c_e_e_un_rifiuto_leggibile(slegato):

@@ -3287,7 +3287,7 @@ def test_una_versione_che_punta_a_un_altra_corsa_viene_respinta(cliente, tmp_pat
     veleno = storico._percorso(out_dir, 1)
     veleno.write_text(
         veleno.read_text(encoding="utf-8").replace(
-            str(out_dir), str(tmp_path / "un-altra-corsa")
+            out_dir.as_posix(), (tmp_path / "un-altra-corsa").as_posix()
         ),
         encoding="utf-8",
     )
