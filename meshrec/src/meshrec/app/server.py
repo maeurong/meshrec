@@ -382,7 +382,8 @@ def _scarto_dei_vertici(
     """
     import open3d as o3d
 
-    triangolare = o3d.io.read_triangle_mesh(str(mesh))
+    with io.percorso_open3d(mesh) as nativo:
+        triangolare = o3d.io.read_triangle_mesh(nativo)
     vertici = np.asarray(triangolare.vertices)
     # La nuvola vuota la rifiuta gia' `quality.vertex_deviation`, con la propria
     # ragione. Questa e' l'altra meta': una mesh senza vertici darebbe un campo
@@ -1961,7 +1962,8 @@ def create_app(
         else:
             import open3d as o3d
 
-            triangolare = o3d.io.read_triangle_mesh(str(percorso))
+            with io.percorso_open3d(percorso) as nativo:
+                triangolare = o3d.io.read_triangle_mesh(nativo)
             vertici = np.asarray(triangolare.vertices)
             facce = np.asarray(triangolare.triangles)
         # Senza triangoli non c'e' nulla da disegnare: 01_cloud.ply letto come
