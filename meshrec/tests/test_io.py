@@ -213,3 +213,59 @@ def test_metriche_scritte_storte_non_fermano_la_raccolta_di_uno_sweep(tmp_path):
     )
 
     assert sweep.leggi_metriche(tmp_path) == {"nodi": 14103}
+
+
+# Percorsi con accenti. Il rosso vero e' solo su Windows: Open3D converte il
+# percorso alla code page ANSI (`fs::path::string()`) e poi stampa i suoi avvisi
+# con `py::print`, che decodifica UTF-8. Su macOS/Linux restano verdi.
+ACCENTATI = ["Rilievo_città", "Łódź_rilievo"]
+
+
+@pytest.mark.parametrize("cartella", ACCENTATI)
+@pytest.mark.parametrize("estensione", io.ESTENSIONI_NUVOLA)
+def test_una_nuvola_in_una_cartella_accentata_si_legge(tmp_path, cartella, estensione):
+    points = synth.sample_box_surface(SIZE, SPACING)
+    ascii_path = tmp_path / f"nuvola{estensione}"
+    _write_ply(ascii_path, points)
+    accentato = tmp_path / cartella / f"più_nuvola{estensione}"
+    accentato.parent.mkdir()
+    accentato.write_bytes(ascii_path.read_bytes())
+
+    letti, _ = io.read_cloud(accentato)
+
+    assert letti == pytest.approx(io.read_cloud(ascii_path)[0])
+
+
+@pytest.mark.parametrize("cartella", ACCENTATI)
+def test_una_nuvola_accentata_assente_dice_il_messaggio_del_programma(tmp_path, cartella):
+    percorso = tmp_path / cartella / "città.ply"
+
+    with pytest.raises(ValueError, match="nessun punto letto") as errore:
+        io.read_cloud(percorso)
+
+    assert str(percorso) in str(errore.value)
+
+
+@pytest.mark.parametrize("cartella", ACCENTATI)
+def test_una_nuvola_scritta_in_una_corsa_accentata_si_rilegge(tmp_path, cartella):
+    points = synth.sample_box_surface(SIZE, SPACING)
+    percorso = tmp_path / cartella / "01_cloud.ply"
+
+    io.write_cloud(percorso, points)
+
+    assert io.read_cloud(percorso)[0] == pytest.approx(points, abs=1e-3)
+
+
+@pytest.mark.parametrize("cartella", ACCENTATI)
+def test_una_mesh_scritta_in_una_corsa_accentata_si_rilegge(tmp_path, cartella):
+    from meshrec.core import pipeline
+
+    vertici = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    facce = np.array([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]])
+    percorso = tmp_path / cartella / "06_repaired.ply"
+
+    pipeline._write_mesh(percorso, vertici, facce)
+    letti, lette = pipeline._read_mesh(percorso)
+
+    assert letti == pytest.approx(vertici)
+    assert (lette == facce).all()
