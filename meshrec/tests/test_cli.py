@@ -892,3 +892,76 @@ def test_su_windows_la_sonda_non_scambia_reuseaddr_per_cortesia(monkeypatch):
         "la sonda ha chiesto SO_REUSEADDR su win32: li' permette il bind sopra "
         "un listener vivo, cioe' spegne la sonda"
     )
+
+
+# --- Client SSE che se ne va --------------------------------------------------
+# `flusso()` di /api/events e' un generatore sincrono: da solo non si accorge che
+# il client ha chiuso. Oggi non serve, perche' uvicorn dichiara ASGI 2.3 e con
+# la 2.3 lo StreamingResponse di starlette ascolta `http.disconnect` e cancella
+# lo stream (starlette/responses.py, ramo `spec_version < 2.4`). Con la 2.4
+# starlette smette di ascoltare e si fida di un OSError su `send` che uvicorn
+# non solleva: misurato il 13/09/2026, 3 client chiusi = 3 thread fermi in
+# flusso() per sempre, e dopo 40 il pool anyio e' esaurito.
+# ponytail: guardia, non fix. Se diventa rosso dopo un aggiornamento di uvicorn
+# o starlette, il fix e' `flusso` async con `await request.is_disconnected()`.
+
+
+def _thread_dentro_flusso():
+    """Thread fuori dal ciclo eventi con `flusso` sullo stack, cioe' fermi li'."""
+    import sys
+    import threading
+
+    nomi = {t.ident: t.name for t in threading.enumerate()}
+    fermi = 0
+    for ident, quadro in sys._current_frames().items():
+        if nomi.get(ident) == "uvicorn":
+            continue
+        while quadro is not None:
+            if quadro.f_code.co_name == "flusso":
+                fermi += 1
+                break
+            quadro = quadro.f_back
+    return fermi
+
+
+def test_i_client_sse_che_se_ne_vanno_non_lasciano_thread_appesi():
+    import socket as _socket
+    import threading
+    import time
+
+    import uvicorn
+
+    from meshrec.app.server import create_app
+
+    server = uvicorn.Server(uvicorn.Config(
+        create_app(None), host="127.0.0.1", port=_porta_libera(), log_level="warning", log_config=None,
+    ))
+    thread = threading.Thread(target=server.run, name="uvicorn", daemon=True)
+    thread.start()
+    scadenza = time.monotonic() + 10
+    while not server.started and thread.is_alive() and time.monotonic() < scadenza:
+        time.sleep(0.05)
+    assert server.started, "il server di prova non si e' messo in ascolto"
+    try:
+        for _ in range(3):
+            presa = _socket.create_connection(("127.0.0.1", server.config.port), timeout=5)
+            try:
+                presa.sendall(b"GET /api/events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+                letto = b""
+                while b"event: stato" not in letto:
+                    pezzo = presa.recv(4096)
+                    assert pezzo, "il server ha chiuso prima del primo evento"
+                    letto += pezzo
+            finally:
+                presa.close()
+        scadenza = time.monotonic() + 2
+        while _thread_dentro_flusso() and time.monotonic() < scadenza:
+            time.sleep(0.05)
+        rimasti = _thread_dentro_flusso()
+        assert rimasti == 0, (
+            f"{rimasti} thread restano dentro flusso() dopo 3 client chiusi: "
+            "uvicorn/starlette non segnalano piu' la disconnessione (ASGI 2.4?)"
+        )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
