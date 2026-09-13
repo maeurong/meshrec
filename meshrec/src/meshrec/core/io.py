@@ -6,6 +6,10 @@ produce alcun segnale a valle e falsa le tensioni di ordini di grandezza.
 
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -26,9 +30,57 @@ class ScaleError(ValueError):
 ESTENSIONI_NUVOLA = (".pcd", ".ply", ".xyz")
 
 
+@contextmanager
+def percorso_open3d(path: Path, *, scrittura: bool = False):
+    """Un percorso che Open3D sa aprire: quello vero se e' ASCII, se no una copia.
+
+    Open3D 0.19 riceve il percorso come `fs::path` e lo passa ai lettori con
+    `filename.string()` (cpp/pybind/io/class_io.cpp), che su Windows lo converte
+    alla code page ANSI: i caratteri fuori da quella code page diventano `?`, e
+    gli avvisi che nominano il file arrivano a `py::print` come byte non UTF-8,
+    cioe' `UnicodeDecodeError` invece di una nuvola vuota. Misurato sul leg
+    Windows (run 34763045593): `città` rompe .pcd e .xyz, `Łódź` tutti i formati.
+    Il rimedio e' non fargli mai vedere un percorso non ASCII.
+
+    ponytail: copia intera del file, costa un giro di disco solo sui percorsi
+    non ASCII. Se `%TEMP%` stesso non e' ASCII (profilo `Niccolò`) si usa il suo
+    nome corto 8.3; con l'8.3 spento su quel volume il limite e' dichiarato
+    nel messaggio. Upgrade se servisse: nome corto del file stesso, niente copia.
+    """
+    path = Path(path)
+    if str(path).isascii():
+        yield str(path)
+        return
+    with tempfile.TemporaryDirectory(dir=_cartella_temporanea_ascii()) as cartella:
+        copia = Path(cartella) / f"open3d{path.suffix}"
+        if not scrittura and path.is_file():
+            shutil.copyfile(path, copia)
+        yield str(copia)
+        if scrittura and copia.exists():
+            shutil.copyfile(copia, path)
+
+
+def _cartella_temporanea_ascii() -> str:
+    cartella = tempfile.gettempdir()
+    if not cartella.isascii() and os.name == "nt":
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32768)
+        if ctypes.windll.kernel32.GetShortPathNameW(cartella, buffer, len(buffer)):
+            cartella = buffer.value
+    if not cartella.isascii():
+        raise ValueError(
+            f"la cartella temporanea '{cartella}' ha caratteri non ASCII e non ha un nome corto: "
+            "Open3D non apre percorsi così su Windows. Imposta TEMP a una cartella "
+            "senza accenti, oppure sposta i file in un percorso senza accenti"
+        )
+    return cartella
+
+
 def read_cloud(path: Path) -> tuple[np.ndarray, np.ndarray | None]:
     """Legge .pcd/.ply/.xyz. Le normali sono restituite solo se presenti nel file."""
-    cloud = o3d.io.read_point_cloud(str(path))
+    with percorso_open3d(path) as nativo:
+        cloud = o3d.io.read_point_cloud(nativo)
     points = np.asarray(cloud.points, dtype=np.float64)
     if len(points) == 0:
         raise ValueError(f"nessun punto letto da '{path}': file assente, vuoto o formato non riconosciuto")
@@ -41,7 +93,12 @@ def write_cloud(path: Path, points: np.ndarray, normals: np.ndarray | None = Non
     cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(np.asarray(points, dtype=np.float64)))
     if normals is not None:
         cloud.normals = o3d.utility.Vector3dVector(np.asarray(normals, dtype=np.float64))
-    scrivi_atomico(Path(path), lambda destinazione: o3d.io.write_point_cloud(str(destinazione), cloud))
+
+    def scrivi(destinazione: Path) -> None:
+        with percorso_open3d(destinazione, scrittura=True) as nativo:
+            o3d.io.write_point_cloud(nativo, cloud)
+
+    scrivi_atomico(Path(path), scrivi)
 
 
 def nn_distances(points: np.ndarray, sample: int, seed: int) -> np.ndarray:
