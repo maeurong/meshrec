@@ -66,3 +66,57 @@ def test_lo_script_del_bundle_scrive_il_codice_d_uscita_nel_log():
     assert "codice=$?" in testo
     assert "uscito con codice $codice" in testo
     assert 'exit "$codice"' in testo  # il bundle non maschera l'uscita con 1
+
+
+def _lancia_il_bundle_con_uscita(tmp_path, codice):
+    """Esegue lo script vero del bundle con un `uv` finto che esce con `codice`
+    e un `osascript` finto che registra il testo del dialogo."""
+    import os
+    import subprocess
+
+    finti = tmp_path / ".local" / "bin"
+    finti.mkdir(parents=True)
+    (finti / "uv").write_text(f"#!/bin/sh\nexit {codice}\n")
+    (finti / "osascript").write_text(f'#!/bin/sh\nprintf "%s" "$2" > "{tmp_path}/dialogo"\n')
+    for f in finti.iterdir():
+        f.chmod(0o755)
+    esito = subprocess.run(
+        ["/bin/sh", str(BUNDLE / "MacOS" / "MeshRec")],
+        env={**os.environ, "HOME": str(tmp_path)},
+        capture_output=True, text=True, timeout=30,
+    )
+    dialogo = tmp_path / "dialogo"
+    log = tmp_path / "Library" / "Logs" / "MeshRec.log"
+    return (
+        esito.returncode,
+        dialogo.read_text(encoding="utf-8") if dialogo.exists() else None,
+        log.read_text(encoding="utf-8") if log.exists() else "",
+    )
+
+
+def test_il_dialogo_distingue_chi_ha_chiuso_meshrec(tmp_path):
+    """Il 12/09/2026 un `pkill` esterno ha chiuso la finestra e il dialogo diceva
+    «si e' fermato con un errore»: la diagnosi e' partita dal programma, che non
+    c'entrava. Segnale mandato da fuori, crash e errore del programma sono tre
+    cose diverse, e il dialogo le dice diverse."""
+    casi = {
+        143: "chiuso da un altro processo",
+        137: "chiuso da un altro processo",
+        129: "chiuso da un altro processo",
+        139: "si è interrotto di colpo",
+        134: "si è interrotto di colpo",
+        1: "si è fermato con un errore",
+    }
+    for codice, attesa in casi.items():
+        cartella = tmp_path / str(codice)
+        uscita, dialogo, log = _lancia_il_bundle_con_uscita(cartella, codice)
+        assert uscita == codice
+        assert dialogo is not None and attesa in dialogo, (codice, dialogo)
+        assert f"uscito con codice {codice}" in log
+
+
+def test_un_uscita_pulita_non_apre_dialoghi(tmp_path):
+    uscita, dialogo, log = _lancia_il_bundle_con_uscita(tmp_path, 0)
+    assert uscita == 0
+    assert dialogo is None
+    assert "uscito con codice" not in log
