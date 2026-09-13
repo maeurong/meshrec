@@ -299,3 +299,45 @@ def test_con_temp_accentato_una_nuvola_accentata_si_legge_lo_stesso(tmp_path, mo
     io.write_cloud(path, points)
 
     assert io.read_cloud(path)[0] == pytest.approx(points, abs=1e-3)
+
+
+def test_fuori_da_windows_un_percorso_accentato_non_si_copia(tmp_path, monkeypatch):
+    """Open3D apre UTF-8 su macOS e Linux: la copia li' e' solo costo."""
+    monkeypatch.setattr(io.sys, "platform", "linux")
+    points = synth.sample_box_surface(SIZE, SPACING)
+    path = tmp_path / "Rilievo_città" / "nuvola.ply"
+    path.parent.mkdir()
+    _write_ply(path, points)
+    monkeypatch.setattr(io.shutil, "copyfile", lambda *a: pytest.fail("copia inutile"))
+
+    with io.percorso_open3d(path) as nativo:
+        assert nativo == str(path)
+    assert len(io.read_cloud(path)[0]) == len(points)
+
+
+def test_su_windows_un_percorso_accentato_passa_da_una_copia_ascii(tmp_path, monkeypatch):
+    monkeypatch.setattr(io.sys, "platform", "win32")
+    points = synth.sample_box_surface(SIZE, SPACING)
+    path = tmp_path / "Rilievo_città" / "01_cloud.ply"
+
+    io.write_cloud(path, points)
+    with io.percorso_open3d(path) as nativo:
+        assert nativo.isascii()
+
+    assert io.read_cloud(path)[0] == pytest.approx(points, abs=1e-3)
+
+
+def test_un_file_sparito_prima_della_copia_da_il_messaggio_del_programma(tmp_path, monkeypatch):
+    """`is_file()` vero, poi il file sparisce: niente `FileNotFoundError` grezza."""
+    monkeypatch.setattr(io.sys, "platform", "win32")
+    path = tmp_path / "Rilievo_città" / "nuvola.ply"
+    path.parent.mkdir()
+    _write_ply(path, synth.sample_box_surface(SIZE, SPACING))
+
+    def sparito(*_):
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(io.shutil, "copyfile", sparito)
+
+    with pytest.raises(ValueError, match="nessun punto letto"):
+        io.read_cloud(path)

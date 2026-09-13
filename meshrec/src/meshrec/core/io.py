@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -32,7 +33,7 @@ ESTENSIONI_NUVOLA = (".pcd", ".ply", ".xyz")
 
 @contextmanager
 def percorso_open3d(path: Path, *, scrittura: bool = False):
-    """Un percorso che Open3D sa aprire: quello vero se e' ASCII, se no una copia.
+    """Un percorso che Open3D sa aprire: quello vero, o su Windows se non e' ASCII una copia.
 
     Open3D 0.19 riceve il percorso come `fs::path` e lo passa ai lettori con
     `filename.string()` (cpp/pybind/io/class_io.cpp), che su Windows lo converte
@@ -42,19 +43,24 @@ def percorso_open3d(path: Path, *, scrittura: bool = False):
     Windows (run 34763045593): `città` rompe .pcd e .xyz, `Łódź` tutti i formati.
     Il rimedio e' non fargli mai vedere un percorso non ASCII.
 
+    Su macOS e Linux Open3D apre UTF-8: nessuna copia.
+
     ponytail: copia intera del file, costa un giro di disco solo sui percorsi
-    non ASCII. Se `%TEMP%` stesso non e' ASCII (profilo `Niccolò`) si usa il suo
+    non ASCII di Windows. Se `%TEMP%` stesso non e' ASCII (profilo `Niccolò`) si usa il suo
     nome corto 8.3; con l'8.3 spento su quel volume il limite e' dichiarato
     nel messaggio. Upgrade se servisse: nome corto del file stesso, niente copia.
     """
     path = Path(path)
-    if str(path).isascii():
+    if str(path).isascii() or sys.platform != "win32":
         yield str(path)
         return
     with tempfile.TemporaryDirectory(dir=_cartella_temporanea_ascii()) as cartella:
         copia = Path(cartella) / f"open3d{path.suffix}"
         if not scrittura and path.is_file():
-            shutil.copyfile(path, copia)
+            try:
+                shutil.copyfile(path, copia)
+            except FileNotFoundError:
+                pass  # nessuna copia: Open3D legge zero punti e il chiamante dice il suo messaggio
         yield str(copia)
         if scrittura and copia.exists():
             shutil.copyfile(copia, path)
