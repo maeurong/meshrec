@@ -216,7 +216,9 @@ def test_lo_schema_non_sposta_l_impronta_dei_registri_in_silenzio():
 
     assert len(marchi) == 22, f"attese 22 righe nei due registri, trovate {len(marchi)}"
     aggregato = hashlib.sha256("\n".join(marchi).encode("utf-8")).hexdigest()
-    assert aggregato == "1465833323a77a9a2eeacdd891cc811cdba4e291a3fb14bff174e35fa78eaad1", (
+    # 13/09/2026, percorsi POSIX: `input.path` delle righe (scritto da Windows
+    # con `\`) si rilegge con `/`, e l'impronta lo porta dentro.
+    assert aggregato == "275aea0125b02da432af544c9032ba49fc5f9dcfb0f7e93659d4a852eac24a16", (
         "lo schema della configurazione ha spostato l'impronta delle righe "
         "registrate: se e' voluto, aggiorna l'aggregato e dillo nel commit"
     )
@@ -226,7 +228,8 @@ def test_lo_schema_non_sposta_l_impronta_dei_registri_in_silenzio():
     ("caso", "impronta"),
     [
         ("lab.yaml", "594edc5c2334706a757f8a965b2b3d8c94579aeb1feabae81885c99e23a4aa5c"),
-        ("muro.yaml", "65efdb8ff0ac3c5f37f98e2e2dbaf9d288274d08d031ff96c4780335d32a7ac2"),
+        # 13/09/2026, percorsi POSIX: `casi/muro.yaml` porta `/` al posto di `\`.
+        ("muro.yaml", "4d63500aca4e8f25e59afdaa7be1a67c7b21ec4725558ef91502ee661a08cc42"),
     ],
 )
 def test_l_impronta_delle_configurazioni_del_caso_studio_e_quella_misurata(caso, impronta):

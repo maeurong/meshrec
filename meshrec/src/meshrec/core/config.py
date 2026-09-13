@@ -6,19 +6,38 @@ Sistema di unita di lavoro: mm, N, MPa, tonnellata, secondo.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Annotated, Literal
 
 import yaml
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
+    PlainSerializer,
     StringConstraints,
     model_validator,
 )
 
 NomeSet = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.-]+$")]
+
+
+def _separatori_posix(valore: object) -> object:
+    if isinstance(valore, (str, PurePath)):
+        return str(valore).replace("\\", "/")
+    return valore
+
+
+# Le stesse corse si aprono da Windows e da macOS: il file porta sempre `/`, e un
+# `\` gia' scritto da Windows si legge come separatore anche dove non lo e'.
+# Nessun nome di file del progetto contiene un `\` letterale (verificato il
+# 13/09/2026), quindi la lettura non toglie niente a nessuno.
+Percorso = Annotated[
+    Path,
+    BeforeValidator(_separatori_posix),
+    PlainSerializer(lambda percorso: percorso.as_posix(), return_type=str, when_used="json"),
+]
 
 
 def _mappa_casefold(nomi: Iterable[str]) -> dict[str, str]:
@@ -102,7 +121,7 @@ class _ModelloBase(BaseModel):
 class InputConfig(_ModelloBase):
     """Step 1: ingresso e scala."""
 
-    path: Path = Field(title="file della nuvola di punti")
+    path: Percorso = Field(title="file della nuvola di punti")
     scale: float = Field(
         default=1.0,
         gt=0.0,
@@ -360,7 +379,7 @@ class RunConfig(_ModelloBase):
     # valore fuori dominio arriva silenziosamente fino alla pipeline.
     model_config = ConfigDict(validate_assignment=True)
 
-    out_dir: Path = Path("runs/default")
+    out_dir: Percorso = Path("runs/default")
     from_step: int = Field(
         default=1,
         ge=1,
@@ -949,8 +968,8 @@ class SweepConfig(_ModelloBase):
             "non contro il lento"
         ),
     )
-    runs_root: Path = Path("runs")
-    registry_root: Path = Path("experiments")
+    runs_root: Percorso = Path("runs")
+    registry_root: Percorso = Path("experiments")
     keep_dominated_artifacts: bool = Field(
         default=False,
         description=(
@@ -972,7 +991,7 @@ class ExperimentConfig(_ModelloBase):
     """Dichiarazione di un esperimento. Tracciata da git accanto al proprio registro."""
 
     name: str
-    base: Path = Field(
+    base: Percorso = Field(
         description=(
             "configurazione di partenza, es. casi/muro.yaml. Risolta rispetto alla "
             "cartella da cui gira il programma, non rispetto a questo file"

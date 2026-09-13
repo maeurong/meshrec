@@ -400,7 +400,7 @@ def run_candidate(
             "input_digest": None,
             "artifacts": {},
             "artifacts_kept": False,
-            "out_dir": str(out_dir),
+            "out_dir": out_dir.as_posix(),
             # config.yaml non e' mai stato scritto su disco in questo ramo:
             # un rerun che lo cita fallirebbe fra mesi. None, non un comando morto.
             "rerun": None,
@@ -489,8 +489,8 @@ def run_candidate(
         "input_digest": input_digest,
         "artifacts": artifacts,
         "artifacts_kept": True,
-        "out_dir": str(out_dir),
-        "rerun": f"uv run meshrec run {config_path} --to-step 11",
+        "out_dir": out_dir.as_posix(),
+        "rerun": f"uv run meshrec run {config_path.as_posix()} --to-step 11",
         "metrics": metrics,
         "provenance": provenance(),
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
