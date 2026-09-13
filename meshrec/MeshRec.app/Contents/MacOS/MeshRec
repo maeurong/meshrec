@@ -21,13 +21,19 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-# Il codice d'uscita si cattura: `if ! uv run ...` lo perdeva, e il dialogo dice
-# solo «si è fermato con un errore». 1 = uscita ordinata del programma,
-# 134/139 = SIGABRT/SIGSEGV in chiusura: due diagnosi diverse, stesso dialogo.
+# Il codice d'uscita si cattura (`if ! uv run ...` lo perdeva) e decide il
+# dialogo. 129/137/143 = SIGHUP/SIGKILL/SIGTERM: qualcun altro ha chiuso il
+# programma (il 12/09/2026 un `pkill` esterno, scambiato per un errore di
+# MeshRec). 134/139 = SIGABRT/SIGSEGV: crash. Il resto: errore del programma.
 uv run meshrec serve "$@" >>"$LOG" 2>&1
 codice=$?
 if [ "$codice" -ne 0 ]; then
     echo "MeshRec uscito con codice $codice" >>"$LOG"
-    osascript -e "display dialog \"MeshRec si è fermato con un errore. Le ultime righe sono in:\n$LOG\" with title \"MeshRec\" buttons {\"OK\"} default button 1 with icon stop"
+    case "$codice" in
+        129|137|143) motivo="MeshRec è stato chiuso da un altro processo (codice $codice), non da un errore del programma: puoi riaprirlo normalmente." ;;
+        134|139) motivo="MeshRec si è chiuso di colpo per un errore interno (codice $codice)." ;;
+        *) motivo="MeshRec si è fermato con un errore (codice $codice)." ;;
+    esac
+    osascript -e "display dialog \"$motivo Le ultime righe sono in:\n$LOG\" with title \"MeshRec\" buttons {\"OK\"} default button 1 with icon stop"
     exit "$codice"
 fi
