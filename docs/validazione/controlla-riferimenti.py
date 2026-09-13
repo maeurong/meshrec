@@ -135,7 +135,7 @@ def controlla(
         for nome, prima, ultima in RIFERIMENTO.findall(riga):
             candidati = indice.get(Path(nome).name, [])
             if "/" in nome:
-                candidati = [c for c in candidati if str(c).endswith(nome)]
+                candidati = [c for c in candidati if c.as_posix().endswith(nome)]
             citato = f"{nome}:{prima}" + (f"-{ultima}" if ultima else "")
             if not candidati:
                 fuori.append(f"{dove}: {citato} -- fuori dall'albero di questo "

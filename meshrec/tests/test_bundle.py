@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import plistlib
 import stat
+import sys
 import tomllib
 from pathlib import Path
 
+import pytest
+
 RADICE = Path(__file__).resolve().parent.parent
+# Il bundle macOS si esegue con /bin/sh e vive del bit di esecuzione POSIX:
+# su Windows non c'e' ne' l'uno ne' l'altro (il bit nell'indice di git lo
+# controlla test_ingresso.py, che gira ovunque).
+solo_posix = pytest.mark.skipif(sys.platform == "win32", reason="bundle macOS: /bin/sh e bit di esecuzione POSIX")
 BUNDLE = RADICE / "MeshRec.app" / "Contents"
 
 
+@solo_posix
 def test_il_bundle_ha_plist_eseguibile_e_icona():
     plist = plistlib.loads((BUNDLE / "Info.plist").read_bytes())
     assert plist["CFBundleName"] == "MeshRec"
@@ -94,6 +102,7 @@ def _lancia_il_bundle_con_uscita(tmp_path, codice):
     )
 
 
+@solo_posix
 def test_il_dialogo_distingue_chi_ha_chiuso_meshrec(tmp_path):
     """Il 12/09/2026 un `pkill` esterno ha chiuso la finestra e il dialogo diceva
     «si e' fermato con un errore»: la diagnosi e' partita dal programma, che non
@@ -115,6 +124,7 @@ def test_il_dialogo_distingue_chi_ha_chiuso_meshrec(tmp_path):
         assert f"uscito con codice {codice}" in log
 
 
+@solo_posix
 def test_un_uscita_pulita_non_apre_dialoghi(tmp_path):
     uscita, dialogo, log = _lancia_il_bundle_con_uscita(tmp_path, 0)
     assert uscita == 0

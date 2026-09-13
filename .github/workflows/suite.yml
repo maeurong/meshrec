@@ -86,6 +86,13 @@ jobs:
         working-directory: meshrec
         run: uv sync --frozen
 
+      - name: diagnosi git (temporanea)
+        if: runner.os == 'Windows'
+        working-directory: meshrec
+        run: |
+          where.exe git
+          uv run python -c "import shutil, os, subprocess; print(shutil.which('git')); print(os.environ['PATH']); print(subprocess.run(['git', '--version'], capture_output=True, text=True))"
+
       - name: la suite predefinita
         working-directory: meshrec
         run: uv run pytest -q

@@ -6,3 +6,8 @@
 # riga CRLF (`\r` finisce dentro l'argomento).
 *.bat text eol=crlf
 *.command text eol=lf
+
+# three.js vendorizzato e' verificato byte per byte (test_server.py, impronta
+# sha256): un checkout Windows con autocrlf gli metterebbe CRLF e l'impronta
+# non tornerebbe piu', su una copia che funziona benissimo.
+meshrec/src/meshrec/ui/vendor/*.js -text
