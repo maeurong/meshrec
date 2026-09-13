@@ -9,8 +9,7 @@
 #   sviluppo avviene su macOS arm64, quindi sono i leg Linux e Windows a dire
 #   qualcosa di nuovo. Windows c'e' dal 13/09/2026: e' la piattaforma d'uso
 #   dell'autore (`MeshRec.bat`, la finestra WebView2) ed era l'unica mai
-#   coperta in CI. Le
-#   grandezze **continue** non sono bit-identiche fra
+#   coperta in CI. Le grandezze **continue** non sono bit-identiche fra
 #   architetture e i test infatti confrontano con tolleranze relative: se
 #   questa matrice diventasse rossa per l'ultima cifra, la risposta e' la
 #   tolleranza dichiarata, non l'uguaglianza esatta.
@@ -85,32 +84,6 @@ jobs:
       - name: sincronizza le dipendenze
         working-directory: meshrec
         run: uv sync --frozen
-
-      - name: diagnosi git (temporanea)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        working-directory: meshrec
-        run: |
-          $sonda = @'
-          import ctypes, os
-          def reale(dove):
-              b = ctypes.create_unicode_buffer(32767)
-              n = ctypes.windll.kernel32.GetEnvironmentVariableW("PATH", b, 32767)
-              print(dove, "reale", n, "os.environ", len(os.environ["PATH"]), flush=True)
-          reale("inizio")
-          import pymeshlab
-          reale("import pymeshlab")
-          ms = pymeshlab.MeshSet()
-          reale("MeshSet")
-          import gmsh
-          reale("import gmsh")
-          gmsh.initialize()
-          reale("gmsh.initialize")
-          gmsh.finalize()
-          reale("gmsh.finalize")
-          '@
-          Set-Content -Path "$env:RUNNER_TEMP\sonda.py" -Value $sonda
-          uv run python "$env:RUNNER_TEMP\sonda.py"
 
       - name: la suite predefinita
         working-directory: meshrec
