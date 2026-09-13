@@ -107,23 +107,35 @@ Le otto regioni, con i tre controlli intrinseci che le hanno tutte respinte
 
 | regione | punti | parallelismo [°] | copertura | costanza sezione | controlli falliti |
 |---|---:|---:|---:|---:|---|
-| 0 | 4.215.879 | 2,29 | 1,00 | 1,187 | costanza_sezione |
+| 0 | 4.215.879 | 0,50 | 1,00 | 1,187 | costanza_sezione |
 | 1 | 14.811 | 10,29 | 1,00 | 0,572 | parallelismo, costanza_sezione |
 | 2 | 8.059 | 10,49 | 1,00 | 0,782 | parallelismo, costanza_sezione |
-| 3 | 3.772 | 5,07 | 1,00 | 0,608 | parallelismo, costanza_sezione |
-| 4 | 3.267 | 31,95 | 1,00 | 0,241 | parallelismo, costanza_sezione |
-| 5 | 1.351 | 36,14 | 1,00 | 0,197 | parallelismo, costanza_sezione |
-| 6 | 2.513 | 1,11 | 1,00 | 0,572 | costanza_sezione |
+| 3 | 3.772 | 0,85 | 1,00 | 0,608 | costanza_sezione |
+| 4 | 3.267 | 13,92 | 1,00 | 0,241 | parallelismo, costanza_sezione |
+| 5 | 1.351 | 10,87 | 1,00 | 0,197 | parallelismo, costanza_sezione |
+| 6 | 2.513 | 0,95 | 1,00 | 0,572 | costanza_sezione |
 | 7 | 380 | 6,17 | 1,00 | 0,173 | parallelismo, costanza_sezione |
 
 (soglie: parallelismo 5,0°, copertura_faccia 0,5, costanza_sezione 0,10 —
 `lab_telaio.yaml`, blocco `wall`)
 
+*13/09/2026 — parallelismo rimisurato.* I valori precedenti (regione 0 2,29°,
+3 5,07°, 4 31,95°, 5 36,14°, 6 1,11°) erano alterati da una cella fantasma al
+bordo della griglia del rigonfiamento: la testa della regione cadeva sul bordo
+di una riga in piu', che il massimo leggeva senza la faccia (PR #208). Rimisurati
+con `wall.scomponi` + `wall.misura` + `wall.controlla` su
+`runs/geoandgeo-lab-pr2/02_segmented.ply`, spacing 1,19227, blocco
+`wall` di `runs/geoandgeo-lab-pr2/config.yaml` (uguale a `lab_telaio.yaml`): `runs/lab_telaio_v2`, citata sopra, non esiste piu', e i suoi numeri coincidono con questa corsa; il codice precedente riproduce la tabella vecchia cifra per
+cifra. Cambia solo il parallelismo: punti, copertura e costanza restano, e la
+regione 3 esce dai falliti per parallelismo. Le accettate restano zero.
+`12_wall.json` delle corse archiviate porta ancora i valori vecchi finche' lo
+step 12 non viene rilanciato.
+
 La regione 0 tiene 4.215.879 punti — il 98,74% dei `punti_dopo: 4.269.608`
 di `runs/lab_telaio_v2/12_wall.json` (il pavimento non viene trovato in
 questo step, `pavimento_trovato: false`: e' gia' fuori dal ritaglio scelto al
 § 8, non c'e' piu' nulla da togliere qui) — **con un parallelismo ottimo**
-(2,29° contro una soglia di 5°): non e' una
+(0,50° contro una soglia di 5°): non e' una
 regione mal misurata, e' il telaio intero preso per un unico prisma. Lo
 spessore mediano che `wall.regioni` misura su questa geometria e' 192,03 mm
 (`spessore_mediano` nello stesso file), sostanzialmente lo stesso su tutte le
@@ -168,7 +180,7 @@ nessuna metrica di qualita' della mesh vedrebbe da sola.
 **Sulla geometria vera, i tre controlli intrinseci hanno respinto tutte e
 otto le regioni** (tabella al § 3): sempre `costanza_sezione` (valori da
 0,173 a 1,187 contro una soglia di 0,10 — nessuna delle otto la rispetta),
-`parallelismo` in aggiunta su sei delle otto (le regioni 0 e 6 lo passano),
+`parallelismo` in aggiunta su cinque delle otto (le regioni 0, 3 e 6 lo passano),
 `copertura_faccia` mai determinante (1,00 su tutte e otto, ben sopra 0,5).
 Nessuna regione ha raggiunto la lista delle accettate, quindi **il
 riempimento di sezione non e' stato esercitato da questa corsa**:
