@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from meshrec.core import synth
+from meshrec.core.gmsh_backend import inizializza
 
 pytestmark = pytest.mark.feasibility
 
@@ -22,7 +23,7 @@ def test_gmsh_meshes_and_optimizes_a_box(tmp_path):
     stl_path = tmp_path / "box.stl"
     _write_stl(str(stl_path))
 
-    gmsh.initialize()
+    inizializza(gmsh)
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.merge(str(stl_path))
