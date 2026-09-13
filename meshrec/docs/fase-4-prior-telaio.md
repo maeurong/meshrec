@@ -125,7 +125,7 @@ bordo della griglia del rigonfiamento: la testa della regione cadeva sul bordo
 di una riga in piu', che il massimo leggeva senza la faccia (PR #208). Rimisurati
 con `wall.scomponi` + `wall.misura` + `wall.controlla` su
 `runs/geoandgeo-lab-pr2/02_segmented.ply`, spacing 1,19227, blocco
-`wall` di `runs/geoandgeo-lab-pr2/config.yaml` (uguale a `lab_telaio.yaml`); il codice precedente riproduce la tabella vecchia cifra per
+`wall` di `runs/geoandgeo-lab-pr2/config.yaml` (uguale a `lab_telaio.yaml`): `runs/lab_telaio_v2`, citata sopra, non esiste piu', e i suoi numeri coincidono con questa corsa; il codice precedente riproduce la tabella vecchia cifra per
 cifra. Cambia solo il parallelismo: punti, copertura e costanza restano, e la
 regione 3 esce dai falliti per parallelismo. Le accettate restano zero.
 `12_wall.json` delle corse archiviate porta ancora i valori vecchi finche' lo

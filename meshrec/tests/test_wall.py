@@ -500,7 +500,7 @@ def test_un_prisma_dritto_col_rumore_del_rilievo_passa_il_parallelismo():
     Windows: con 1 mm di rumore l'ultima riga raccoglie i pochi punti della
     testa che sporgono, il massimo li' non trova la faccia e il parallelismo di
     un prisma dritto oscillava fra 0,1 e 5,5 gradi a seconda del seme, oltre
-    la soglia di 5 su un seme su dieci (il primo e' 25), su ogni piattaforma.
+    la soglia di 5 su un seme su trenta (il 25, 5,48 gradi), su ogni piattaforma.
     Trenta semi fissi: il generatore PCG64 da' gli stessi numeri ovunque."""
     punti = synth.sample_box_surface((200.0, 140.0, 1500.0), 15.0)
     for seme in range(30):
