@@ -88,10 +88,12 @@ jobs:
 
       - name: diagnosi git (temporanea)
         if: runner.os == 'Windows'
+        continue-on-error: true
         working-directory: meshrec
         run: |
-          where.exe git
-          uv run python -c "import shutil, os, subprocess; print(shutil.which('git')); print(os.environ['PATH']); print(subprocess.run(['git', '--version'], capture_output=True, text=True))"
+          foreach ($m in 'numpy', 'scipy', 'open3d', 'tetgen', 'meshio', 'pymeshfix', 'pymeshlab', 'gmsh', 'webview', 'meshrec.app.server') {
+            uv run python -c "import ctypes, shutil, subprocess; import $m; b = ctypes.create_unicode_buffer(32767); ctypes.windll.kernel32.GetEnvironmentVariableW('PATH', b, 32767); print('$m', 'git' in b.value.lower(), len(b.value), shutil.which('git'), end=' '); print(subprocess.run(['git', '--version'], capture_output=True).returncode)"
+          }
 
       - name: la suite predefinita
         working-directory: meshrec

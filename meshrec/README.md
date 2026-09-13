@@ -26,6 +26,11 @@ uv run meshrec serve                   # apre una finestra propria sulla scherma
 finestra (utile per le DevTools); senza il runtime WebView2 su Windows il
 programma ripiega su Edge o Chrome in modalità app.
 
+La prova a mano della finestra su Windows è guidata da `prova-windows.ps1`
+(tasto destro › Esegui con PowerShell): controlla da solo processo, porta e
+collegamento, chiede il resto e scrive l'esito in
+`../docs/prove/2026-09-finestra-windows.md`.
+
 I due launcher non chiedono nulla e non nominano nessun file: si spostano nella
 propria cartella — i percorsi relativi del programma (`runs/`, `experiments/`,
 `.cache/viewport`) sono risolti da lì — e avviano `meshrec serve` senza
