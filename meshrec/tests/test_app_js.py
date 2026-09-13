@@ -176,7 +176,7 @@ def _importa(percorso: Path, corpo: str) -> str:
     davvero, e importarli e' anche il banco che li tiene valutabili da soli."""
     esito = subprocess.run(
         [_node(), "--input-type=module", "-e", f"import * as modulo from {percorso.resolve().as_uri()!r};\n" + corpo],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
     )
     assert esito.returncode == 0, esito.stderr
     return esito.stdout
@@ -268,7 +268,7 @@ def _esegui(tmp_path: Path, sorgente: str) -> str:
     `node` che salta, e il suo messaggio arriva qui dentro."""
     prova = tmp_path / "prova.mjs"
     prova.write_text(sorgente, encoding="utf-8")
-    esito = subprocess.run([_node(), str(prova)], capture_output=True, text=True)
+    esito = subprocess.run([_node(), str(prova)], capture_output=True, text=True, encoding="utf-8")
     assert esito.returncode == 0, esito.stderr
     return esito.stdout
 

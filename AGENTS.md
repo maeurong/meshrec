@@ -103,9 +103,9 @@ difetti veri.
 risultato peggiora.** Una misura senza il suo controllo non è finita.
 
 **Un esito discreto che dipende dalla piattaforma è un difetto** — un ordine, un
-indice, un conteggio, una scelta fra alternative. La matrice Linux/macOS della
-CI è il rilevatore, e ne ha già trovato uno: l'ordine dei voxel restituito da
-Open3D differiva fra le due piattaforme.
+indice, un conteggio, una scelta fra alternative. La matrice Linux/macOS/Windows
+della CI è il rilevatore, e ne ha già trovato uno: l'ordine dei voxel restituito
+da Open3D differiva fra due piattaforme.
 
 **Le grandezze continue non ricadono sotto quella regola.** Le riduzioni in
 virgola mobile non sono bit-identiche fra arm64 e x86-64: i test confrontano con
@@ -118,6 +118,6 @@ tolleranza dichiarata, non l'uguaglianza esatta.
   che dica la cosa.
 - Messaggi di commit **in italiano**, formato Conventional Commits: il soggetto
   dice cosa cambia e il corpo, quando serve, dice perché.
-- Pull request verso `main`. La CI deve essere verde su **entrambe** le
+- Pull request verso `main`. La CI deve essere verde su **tutte e tre** le
   piattaforme, non su una.
 - I test stanno accanto al codice che verificano, in `meshrec/tests/`.

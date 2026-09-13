@@ -5,6 +5,7 @@ import inspect
 import json
 import re
 import struct
+import sys
 import zlib
 from datetime import date, datetime
 from pathlib import Path
@@ -1652,6 +1653,7 @@ def test_ogni_classe_scritta_nei_documenti_ha_una_regola_nel_foglio(tmp_path):
         assert not senza, f"classi scritte e mai vestite: {senza}"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="NTFS vieta < e > nei nomi: su Windows la cartella non puo' esistere")
 def test_un_nome_di_cartella_con_caratteri_html_arriva_come_testo(tmp_path):
     """I nomi di cartella li sceglie chi lancia la corsa, non il programma.
 
