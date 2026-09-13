@@ -495,6 +495,24 @@ def test_il_rigonfiamento_non_dipende_dall_ultima_cifra_dei_punti(gradi):
         assert mappa == pytest.approx(mappe[0], abs=1e-6)
 
 
+def test_un_prisma_dritto_col_rumore_del_rilievo_passa_il_parallelismo():
+    """La riga fantasma in coda alla griglia non e' solo un difetto di
+    Windows: con 1 mm di rumore l'ultima riga raccoglie i pochi punti della
+    testa che sporgono, il massimo li' non trova la faccia e il parallelismo di
+    un prisma dritto oscillava fra 0,1 e 5,5 gradi a seconda del seme, oltre
+    la soglia di 5 su un seme su dieci (il primo e' 25), su ogni piattaforma.
+    Trenta semi fissi: il generatore PCG64 da' gli stessi numeri ovunque."""
+    punti = synth.sample_box_surface((200.0, 140.0, 1500.0), 15.0)
+    for seme in range(30):
+        rumorosi = punti + np.random.default_rng(seme).normal(0.0, 1.0, punti.shape)
+        direzioni, _ = wall.terna(rumorosi)
+
+        membratura = wall.misura(rumorosi, direzioni, _cfg())
+
+        esito = wall.controlla(membratura, _cfg())["parallelismo"]
+        assert esito["passato"] is True, f"seme {seme}: {esito['valore']:.2f} gradi"
+
+
 def test_il_rigonfiamento_e_una_mappa_e_trova_la_pancia_dove_c_e():
     """Il controllo che smentisce il precedente: una faccia gonfiata di 25 mm
     al centro deve comparire nella mappa, e nel fuori piombo no."""

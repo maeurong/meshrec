@@ -654,8 +654,9 @@ def misura(punti_regione: np.ndarray, direzioni: np.ndarray, cfg: WallConfig) ->
     # e' il piano medio della faccia stessa. Una mappa per cella della griglia
     # di sezione, non un numero. La griglia corre lungo l'asse ed e2, cosi' la
     # quota che resta libera di variare e' e1 -- la direzione trasversale del
-    # pezzo intero -- ed e' quella su cui una faccia gonfiata si vede. Stesso
-    # lato_fetta gia' usato sopra per dispersione e riempimento.
+    # pezzo intero -- ed e' quella su cui una faccia gonfiata si vede. Le righe
+    # sono le fette della dispersione di sezione, larghe lato_fetta; il
+    # riempimento usa un'altra griglia (lato_celle).
     #
     # ponytail: righe = le stesse `fetta` di sopra, colonne con lo stesso
     # digitize+clip, e non chiavi_di_cella. Con floor dal minimo le facce di
@@ -665,7 +666,10 @@ def misura(punti_regione: np.ndarray, direzioni: np.ndarray, cfg: WallConfig) ->
     # rigonfiamento saltava a multipli del passo di campionamento (31,1 su
     # Windows, dove la SVD cambia l'ultima cifra da un giro all'altro). Il clip
     # riporta l'estremo nell'ultima cella piena. Le colonne arrotondano il
-    # numero di celle invece di troncarlo: stesso lato a meno di un terzo.
+    # numero di celle invece di troncarlo: con almeno due colonne ciascuna e'
+    # larga fra 0,75 e 1,25 lato_fetta; con una sola e' larga quanto la
+    # sezione, fino a 1,5 lato_fetta (una sezione da 0,4 lati da' una colonna
+    # da 0,4).
     trasversale = sezione_2d[:, 1]
     colonne = max(1, int(round(float(np.ptp(trasversale)) / lato_fetta)))
     bordi_colonne = np.linspace(trasversale.min(), trasversale.max(), colonne + 1)
