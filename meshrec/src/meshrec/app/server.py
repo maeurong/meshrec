@@ -908,8 +908,8 @@ def create_app(
         return {
             "legata": True,
             "corsa": nome_corrente(),
-            "out_dir": str(cfg.run.out_dir),
-            "config_path": str(config_path),
+            "out_dir": cfg.run.out_dir.as_posix(),
+            "config_path": config_path.as_posix(),
             "steps": steps.run_state(cfg.run.out_dir, cfg),
         }
 
@@ -943,7 +943,7 @@ def create_app(
                 except Exception as errore:
                     voce["errore"] = _rifiuto_leggibile(errore)
                 else:
-                    voce["nuvola"] = str(cfg.input.path)
+                    voce["nuvola"] = cfg.input.path.as_posix()
                 corse.append(voce)
         return {"radice": str(radice_corse), "corse": corse, "corrente": nome_corrente()}
 

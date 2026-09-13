@@ -37,6 +37,10 @@ configurazione scrive sempre `/` su ogni piattaforma e legge un `\` come
 separatore anche su macOS (`Percorso` in `core/config.py`), e `muro.yaml` porta
 `/`.
 
+Corse nate su Windows prima del 13/09/2026: al primo avvio gli step vanno
+rieseguiti una volta. Le impronte in `steps.json` erano calcolate con `\`, e
+tutti e dodici risultano «non valido»; gli artefatti restano sul disco.
+
 Il prezzo, voluto: l'impronta di `muro.yaml` e l'aggregato delle ventidue righe
 registrate si sono mossi, perché `input.path` entra nell'impronta. Le righe
 restano leggibili — ognuna porta la propria configurazione e la propria

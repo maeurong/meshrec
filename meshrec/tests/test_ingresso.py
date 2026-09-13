@@ -96,7 +96,7 @@ def test_una_corsa_creata_compare_nell_elenco_con_la_sua_nuvola(slegato, nuvola)
     corpo = slegato.get("/api/corse").json()
 
     assert [voce["nome"] for voce in corpo["corse"]] == ["provino"]
-    assert corpo["corse"][0]["nuvola"] == str(nuvola)
+    assert corpo["corse"][0]["nuvola"] == nuvola.as_posix()
     assert corpo["corse"][0]["errore"] is None
     assert corpo["corrente"] == "provino"
 

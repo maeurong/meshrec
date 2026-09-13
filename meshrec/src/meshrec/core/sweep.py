@@ -21,7 +21,12 @@ from pathlib import Path
 
 import numpy as np
 
-from meshrec.core.config import BLOCCHI_RIMOSSI, ExperimentConfig, PipelineConfig
+from meshrec.core.config import (
+    BLOCCHI_RIMOSSI,
+    ExperimentConfig,
+    PipelineConfig,
+    _separatori_posix,
+)
 
 
 # I blocchi di PipelineConfig che non entrano mai nell'impronta di sweep.
@@ -621,7 +626,7 @@ def measure_thickness_error(row: dict[str, object], source_thickness: float | No
     from meshrec.core import quality
     from meshrec.core.pipeline import ARTIFACTS
 
-    repaired = Path(row["out_dir"]) / ARTIFACTS[6]
+    repaired = Path(_separatori_posix(row["out_dir"])) / ARTIFACTS[6]
     if not repaired.exists():
         return None
     import open3d as o3d
@@ -665,7 +670,7 @@ def prune(rows: list[dict[str, object]], front: list[dict[str, object]]) -> int:
     for row in rows:
         if row["fingerprint"] in kept or not row.get("out_dir"):
             continue
-        candidate_dir = Path(row["out_dir"])
+        candidate_dir = Path(_separatori_posix(row["out_dir"]))
         if not candidate_dir.is_dir():
             # run_candidate scrive questa riga quando la cartella del
             # candidato non si e' potuta creare (permessi negati, collisione
@@ -806,7 +811,7 @@ def verify_registry(path: Path) -> list[dict[str, object]]:
         mancanti: list[str] = []
         diversi: list[str] = []
         for name, digest in row.get("artifacts", {}).items():
-            item = Path(row["out_dir"]) / name
+            item = Path(_separatori_posix(row["out_dir"])) / name
             if not item.exists():
                 mancanti.append(name)
             elif file_digest(item) != digest:
