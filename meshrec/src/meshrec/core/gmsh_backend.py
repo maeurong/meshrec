@@ -12,6 +12,7 @@ non si stima soltanto, si calibra (vedi `_calibrate`).
 from __future__ import annotations
 
 import contextlib
+import os
 import tempfile
 from pathlib import Path
 
@@ -24,6 +25,26 @@ from meshrec.core.quality import mesh_volume
 # ma costanti dell'algoritmo che cerca la dimensione caratteristica.
 _MAX_ATTEMPTS = 4
 _ACCEPTED_RATIO = (0.85, 1.2)
+
+
+def inizializza(gmsh) -> None:
+    """`gmsh.initialize()` che lascia intatto il PATH nativo del processo.
+
+    gmsh 4.15 in `Msg::Initialize` aggiunge la propria cartella al PATH
+    (GmshMessage.cpp:185) leggendolo, su Windows, in un buffer di MAX_PATH
+    byte (OS.cpp:290) e riscrivendolo con `_wputenv`: il PATH nativo si
+    tronca (misurato in CI: 2865 -> 306 caratteri) mentre `os.environ` resta
+    intatto, e ogni sottoprocesso lanciato dopo non trova piu' `git`.
+    """
+    path = os.environ.get("PATH")
+    try:
+        gmsh.initialize()
+    finally:
+        # ponytail: riassegnare os.environ richiama putenv e riscrive il PATH
+        # nativo da solo, su tutte le piattaforme; su POSIX gmsh non tronca
+        # ma aggiunge la cartella dell'interprete, e si toglie anche quella.
+        if path is not None:
+            os.environ["PATH"] = path
 
 
 def _extract_mesh(gmsh) -> tuple[np.ndarray, np.ndarray]:
@@ -58,7 +79,7 @@ def _mesh_from_stl(stl_path: Path, size: float | None) -> tuple[np.ndarray, np.n
     """
     import gmsh
 
-    gmsh.initialize()
+    inizializza(gmsh)
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.merge(str(stl_path))

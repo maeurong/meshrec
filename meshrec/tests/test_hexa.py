@@ -15,6 +15,7 @@ import pytest
 
 from meshrec.core import hexa, quality
 from meshrec.core.config import ModelConfig
+from meshrec.core.gmsh_backend import inizializza
 
 # Un rettangolo 200 x 140, in senso antiorario. Sono numeri del banco.
 RETTANGOLO = np.array([[0.0, 0.0], [200.0, 0.0], [200.0, 140.0], [0.0, 140.0]])
@@ -800,7 +801,7 @@ def _prisma_scatola(origine, asse, lati, lunghezza):
 def _rileggi_step(percorso):
     """Solidi e volume totale del file STEP, riletti con gmsh: e' l'oracolo, non la funzione."""
     import gmsh
-    gmsh.initialize()
+    inizializza(gmsh)
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         entita = gmsh.model.occ.importShapes(str(percorso))
