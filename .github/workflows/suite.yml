@@ -91,24 +91,26 @@ jobs:
         continue-on-error: true
         working-directory: meshrec
         run: |
-          $plugin = @'
-          import ctypes, os, subprocess, pytest
-          def _prova(dove):
-              try:
-                  subprocess.run(["git", "--version"], capture_output=True)
-              except FileNotFoundError:
-                  b = ctypes.create_unicode_buffer(32767)
-                  n = ctypes.windll.kernel32.GetEnvironmentVariableW("PATH", b, 32767)
-                  pytest.exit(f"GIT PERSO {dove} PATH reale {n} {b.value[:400]!r} os.environ {len(os.environ.get('PATH', ''))} cwd {os.getcwd()}", returncode=0)
-          def pytest_sessionstart(session):
-              _prova("all'avvio")
-          def pytest_runtest_teardown(item):
-              _prova("dopo " + item.nodeid)
+          $sonda = @'
+          import ctypes, os
+          def reale(dove):
+              b = ctypes.create_unicode_buffer(32767)
+              n = ctypes.windll.kernel32.GetEnvironmentVariableW("PATH", b, 32767)
+              print(dove, "reale", n, "os.environ", len(os.environ["PATH"]), flush=True)
+          reale("inizio")
+          import pymeshlab
+          reale("import pymeshlab")
+          ms = pymeshlab.MeshSet()
+          reale("MeshSet")
+          import gmsh
+          reale("import gmsh")
+          gmsh.initialize()
+          reale("gmsh.initialize")
+          gmsh.finalize()
+          reale("gmsh.finalize")
           '@
-          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\diag" | Out-Null
-          Set-Content -Path "$env:RUNNER_TEMP\diag\diag_git.py" -Value $plugin
-          $env:PYTHONPATH = "$env:RUNNER_TEMP\diag"
-          uv run pytest -q -p diag_git -p no:cacheprovider
+          Set-Content -Path "$env:RUNNER_TEMP\sonda.py" -Value $sonda
+          uv run python "$env:RUNNER_TEMP\sonda.py"
 
       - name: la suite predefinita
         working-directory: meshrec
