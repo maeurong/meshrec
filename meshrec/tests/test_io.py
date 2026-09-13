@@ -1,6 +1,7 @@
 """Step 1: caricamento, filtro dei non finiti, spaziatura, scala."""
 
 import ast
+import os
 import json
 from pathlib import Path
 
@@ -213,3 +214,130 @@ def test_metriche_scritte_storte_non_fermano_la_raccolta_di_uno_sweep(tmp_path):
     )
 
     assert sweep.leggi_metriche(tmp_path) == {"nodi": 14103}
+
+
+# Percorsi con accenti. Il rosso vero e' solo su Windows: Open3D converte il
+# percorso alla code page ANSI (`fs::path::string()`) e poi stampa i suoi avvisi
+# con `py::print`, che decodifica UTF-8. Su macOS/Linux restano verdi.
+ACCENTATI = ["Rilievo_città", "Łódź_rilievo"]
+
+
+@pytest.mark.parametrize("cartella", ACCENTATI)
+@pytest.mark.parametrize("estensione", io.ESTENSIONI_NUVOLA)
+def test_una_nuvola_in_una_cartella_accentata_si_legge(tmp_path, cartella, estensione):
+    points = synth.sample_box_surface(SIZE, SPACING)
+    ascii_path = tmp_path / f"nuvola{estensione}"
+    _write_ply(ascii_path, points)
+    accentato = tmp_path / cartella / f"più_nuvola{estensione}"
+    accentato.parent.mkdir()
+    accentato.write_bytes(ascii_path.read_bytes())
+
+    letti, _ = io.read_cloud(accentato)
+
+    assert letti == pytest.approx(io.read_cloud(ascii_path)[0])
+
+
+@pytest.mark.parametrize("cartella", ACCENTATI)
+def test_una_nuvola_accentata_assente_dice_il_messaggio_del_programma(tmp_path, cartella):
+    percorso = tmp_path / cartella / "città.ply"
+
+    with pytest.raises(ValueError, match="nessun punto letto") as errore:
+        io.read_cloud(percorso)
+
+    assert str(percorso) in str(errore.value)
+
+
+@pytest.mark.parametrize("cartella", ACCENTATI)
+def test_una_nuvola_scritta_in_una_corsa_accentata_si_rilegge(tmp_path, cartella):
+    points = synth.sample_box_surface(SIZE, SPACING)
+    percorso = tmp_path / cartella / "01_cloud.ply"
+
+    io.write_cloud(percorso, points)
+
+    assert io.read_cloud(percorso)[0] == pytest.approx(points, abs=1e-3)
+
+
+@pytest.mark.parametrize("cartella", ACCENTATI)
+def test_una_mesh_scritta_in_una_corsa_accentata_si_rilegge(tmp_path, cartella):
+    from meshrec.core import pipeline
+
+    vertici = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    facce = np.array([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]])
+    percorso = tmp_path / cartella / "06_repaired.ply"
+
+    pipeline._write_mesh(percorso, vertici, facce)
+    letti, lette = pipeline._read_mesh(percorso)
+
+    assert letti == pytest.approx(vertici)
+    assert (lette == facce).all()
+
+
+def test_un_percorso_ascii_arriva_a_open3d_tale_e_quale_senza_copie(tmp_path, monkeypatch):
+    """Il costo della copia lo pagano solo i percorsi non ASCII.
+
+    Mutazione che lo uccide: togliere il ramo `isascii()` da `percorso_open3d`.
+    """
+    points = synth.sample_box_surface(SIZE, SPACING)
+    path = tmp_path / "nuvola.ply"
+    _write_ply(path, points)
+    monkeypatch.setattr(io.shutil, "copyfile", lambda *a: pytest.fail("copia inutile"))
+
+    with io.percorso_open3d(path) as nativo:
+        assert nativo == str(path)
+    assert len(io.read_cloud(path)[0]) == len(points)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="il nome corto 8.3 esiste solo su Windows")
+def test_con_temp_accentato_una_nuvola_accentata_si_legge_lo_stesso(tmp_path, monkeypatch):
+    """Il profilo `C:\\Users\\Niccolò`: anche `%TEMP%` porta l'accento."""
+    points = synth.sample_box_surface(SIZE, SPACING)
+    temp = tmp_path / "Niccolò_Temp"
+    temp.mkdir()
+    monkeypatch.setattr(io.tempfile, "tempdir", str(temp))
+    path = tmp_path / "Rilievo_città" / "nuvola.ply"
+    path.parent.mkdir()
+    io.write_cloud(path, points)
+
+    assert io.read_cloud(path)[0] == pytest.approx(points, abs=1e-3)
+
+
+def test_fuori_da_windows_un_percorso_accentato_non_si_copia(tmp_path, monkeypatch):
+    """Open3D apre UTF-8 su macOS e Linux: la copia li' e' solo costo."""
+    monkeypatch.setattr(io.sys, "platform", "linux")
+    points = synth.sample_box_surface(SIZE, SPACING)
+    path = tmp_path / "Rilievo_città" / "nuvola.ply"
+    path.parent.mkdir()
+    _write_ply(path, points)
+    monkeypatch.setattr(io.shutil, "copyfile", lambda *a: pytest.fail("copia inutile"))
+
+    with io.percorso_open3d(path) as nativo:
+        assert nativo == str(path)
+    assert len(io.read_cloud(path)[0]) == len(points)
+
+
+def test_su_windows_un_percorso_accentato_passa_da_una_copia_ascii(tmp_path, monkeypatch):
+    monkeypatch.setattr(io.sys, "platform", "win32")
+    points = synth.sample_box_surface(SIZE, SPACING)
+    path = tmp_path / "Rilievo_città" / "01_cloud.ply"
+
+    io.write_cloud(path, points)
+    with io.percorso_open3d(path) as nativo:
+        assert nativo.isascii()
+
+    assert io.read_cloud(path)[0] == pytest.approx(points, abs=1e-3)
+
+
+def test_un_file_sparito_prima_della_copia_da_il_messaggio_del_programma(tmp_path, monkeypatch):
+    """`is_file()` vero, poi il file sparisce: niente `FileNotFoundError` grezza."""
+    monkeypatch.setattr(io.sys, "platform", "win32")
+    path = tmp_path / "Rilievo_città" / "nuvola.ply"
+    path.parent.mkdir()
+    _write_ply(path, synth.sample_box_surface(SIZE, SPACING))
+
+    def sparito(*_):
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(io.shutil, "copyfile", sparito)
+
+    with pytest.raises(ValueError, match="nessun punto letto"):
+        io.read_cloud(path)
