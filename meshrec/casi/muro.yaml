@@ -1,5 +1,5 @@
 input:
-  path: ..\Nuvole di punti\muro_generato.ply
+  path: ../Nuvole di punti/muro_generato.ply
   scale: 1000.0
   max_points: 20000000
   expected_size:
@@ -52,5 +52,5 @@ tet:
 export:
   set_tolerance_factor: 6.0
 run:
-  out_dir: runs\sweep\muro\83bbe93f7ce6
+  out_dir: runs/sweep/muro/83bbe93f7ce6
   from_step: 1

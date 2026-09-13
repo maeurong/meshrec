@@ -21,7 +21,12 @@ from pathlib import Path
 
 import numpy as np
 
-from meshrec.core.config import BLOCCHI_RIMOSSI, ExperimentConfig, PipelineConfig
+from meshrec.core.config import (
+    BLOCCHI_RIMOSSI,
+    ExperimentConfig,
+    PipelineConfig,
+    _separatori_posix,
+)
 
 
 # I blocchi di PipelineConfig che non entrano mai nell'impronta di sweep.
@@ -400,7 +405,7 @@ def run_candidate(
             "input_digest": None,
             "artifacts": {},
             "artifacts_kept": False,
-            "out_dir": str(out_dir),
+            "out_dir": out_dir.as_posix(),
             # config.yaml non e' mai stato scritto su disco in questo ramo:
             # un rerun che lo cita fallirebbe fra mesi. None, non un comando morto.
             "rerun": None,
@@ -489,8 +494,8 @@ def run_candidate(
         "input_digest": input_digest,
         "artifacts": artifacts,
         "artifacts_kept": True,
-        "out_dir": str(out_dir),
-        "rerun": f"uv run meshrec run {config_path} --to-step 11",
+        "out_dir": out_dir.as_posix(),
+        "rerun": f"uv run meshrec run {config_path.as_posix()} --to-step 11",
         "metrics": metrics,
         "provenance": provenance(),
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -621,7 +626,7 @@ def measure_thickness_error(row: dict[str, object], source_thickness: float | No
     from meshrec.core import io, quality
     from meshrec.core.pipeline import ARTIFACTS
 
-    repaired = Path(row["out_dir"]) / ARTIFACTS[6]
+    repaired = Path(_separatori_posix(row["out_dir"])) / ARTIFACTS[6]
     if not repaired.exists():
         return None
     import open3d as o3d
@@ -666,7 +671,7 @@ def prune(rows: list[dict[str, object]], front: list[dict[str, object]]) -> int:
     for row in rows:
         if row["fingerprint"] in kept or not row.get("out_dir"):
             continue
-        candidate_dir = Path(row["out_dir"])
+        candidate_dir = Path(_separatori_posix(row["out_dir"]))
         if not candidate_dir.is_dir():
             # run_candidate scrive questa riga quando la cartella del
             # candidato non si e' potuta creare (permessi negati, collisione
@@ -807,7 +812,7 @@ def verify_registry(path: Path) -> list[dict[str, object]]:
         mancanti: list[str] = []
         diversi: list[str] = []
         for name, digest in row.get("artifacts", {}).items():
-            item = Path(row["out_dir"]) / name
+            item = Path(_separatori_posix(row["out_dir"])) / name
             if not item.exists():
                 mancanti.append(name)
             elif file_digest(item) != digest:

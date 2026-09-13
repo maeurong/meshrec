@@ -28,17 +28,22 @@ uv run meshrec sweep experiments/lab_crop/esperimento.yaml
 `experiments/*/esperimento.yaml` li nomina con la stessa regola
 (`base: casi/lab.yaml`).
 
-## Un percorso da Windows, non ancora corretto
+## Percorsi da Windows (corretto il 13/09/2026)
 
-`muro.yaml` porta `path: ..\Nuvole di punti\muro_generato.ply`, con le barre
-rovesciate: è stato scritto prima del trasloco su macOS del 16/08/2026. Su
-questa macchina quel percorso **non esiste** — misurato: `exists()` è falso, e
-il file vero è `../Nuvole di punti/muro_generato.ply`. Quindi
-`uv run meshrec sweep experiments/muro/esperimento.yaml` oggi non parte.
+`muro.yaml` portava `path: ..\Nuvole di punti\muro_generato.ply`, scritto su
+Windows prima del trasloco su macOS del 16/08/2026: su macOS quel `\` era un
+carattere del nome e la corsa non partiva. Da `fix/windows-percorsi` la
+configurazione scrive sempre `/` su ogni piattaforma e legge un `\` come
+separatore anche su macOS (`Percorso` in `core/config.py`), e `muro.yaml` porta
+`/`.
 
-Non è corretto qui di proposito: cambiare `input.path` cambia l'impronta della
-base, e le impronte di questi quattro file sono state verificate identiche
-prima e dopo lo spostamento in `casi/`. La correzione va fatta insieme alla
-deriva già misurata fra le basi e i registri di sweep — espandendo oggi gli
-esperimenti dalle basi, `experiments/lab_crop` combacia 0 righe su 11 e
-`experiments/muro` 2 su 11 — non una alla volta.
+Corse nate su Windows prima del 13/09/2026: al primo avvio gli step vanno
+rieseguiti una volta. Le impronte in `steps.json` erano calcolate con `\`, e
+tutti e dodici risultano «non valido»; gli artefatti restano sul disco.
+
+Il prezzo, voluto: l'impronta di `muro.yaml` e l'aggregato delle ventidue righe
+registrate si sono mossi, perché `input.path` entra nell'impronta. Le righe
+restano leggibili — ognuna porta la propria configurazione e la propria
+impronta misurata — ma la deriva già misurata fra basi e registri
+(`experiments/lab_crop` 0 righe su 11, `experiments/muro` 2 su 11) non si
+ricompone da qui.

@@ -216,7 +216,9 @@ def test_lo_schema_non_sposta_l_impronta_dei_registri_in_silenzio():
 
     assert len(marchi) == 22, f"attese 22 righe nei due registri, trovate {len(marchi)}"
     aggregato = hashlib.sha256("\n".join(marchi).encode("utf-8")).hexdigest()
-    assert aggregato == "1465833323a77a9a2eeacdd891cc811cdba4e291a3fb14bff174e35fa78eaad1", (
+    # 13/09/2026, percorsi POSIX: `input.path` delle righe (scritto da Windows
+    # con `\`) si rilegge con `/`, e l'impronta lo porta dentro.
+    assert aggregato == "275aea0125b02da432af544c9032ba49fc5f9dcfb0f7e93659d4a852eac24a16", (
         "lo schema della configurazione ha spostato l'impronta delle righe "
         "registrate: se e' voluto, aggiorna l'aggregato e dillo nel commit"
     )
@@ -226,7 +228,8 @@ def test_lo_schema_non_sposta_l_impronta_dei_registri_in_silenzio():
     ("caso", "impronta"),
     [
         ("lab.yaml", "594edc5c2334706a757f8a965b2b3d8c94579aeb1feabae81885c99e23a4aa5c"),
-        ("muro.yaml", "65efdb8ff0ac3c5f37f98e2e2dbaf9d288274d08d031ff96c4780335d32a7ac2"),
+        # 13/09/2026, percorsi POSIX: `casi/muro.yaml` porta `/` al posto di `\`.
+        ("muro.yaml", "4d63500aca4e8f25e59afdaa7be1a67c7b21ec4725558ef91502ee661a08cc42"),
     ],
 )
 def test_l_impronta_delle_configurazioni_del_caso_studio_e_quella_misurata(caso, impronta):
@@ -859,3 +862,85 @@ def test_la_configurazione_non_esporta_piu_i_simboli_dell_analisi():
     assert not hasattr(config, "AnalysisConfig")
     assert not hasattr(config, "GRAVITY_MM_S2")
     assert not hasattr(config.PipelineConfig, "analisi_dichiarata")
+
+
+# Percorsi fra Windows e macOS (13/09/2026). Mario apre le stesse corse sulle due
+# macchine: un `\` scritto da Windows, su macOS, e' un carattere del nome.
+
+
+@pytest.mark.parametrize(
+    ("scritto", "atteso"),
+    [
+        (r"runs\geoandgeo\01_cloud.ply", "runs/geoandgeo/01_cloud.ply"),
+        (r"runs\città vecchia\nuvola 01.ply", "runs/città vecchia/nuvola 01.ply"),
+        (r"C:\Users\mario\nuvola.ply", "C:/Users/mario/nuvola.ply"),
+    ],
+)
+def test_la_configurazione_salvata_non_porta_separatori_di_windows(tmp_path, scritto, atteso):
+    from pathlib import PureWindowsPath
+
+    for valore in (scritto, PureWindowsPath(scritto)):
+        cfg = PipelineConfig(
+            input=config.InputConfig(path=valore),
+            run=config.RunConfig(out_dir=type(valore)(r"runs\città vecchia")),
+        )
+        percorso = tmp_path / "config.yaml"
+        config.save_config(cfg, percorso)
+
+        testo = percorso.read_text(encoding="utf-8")
+        assert "\\" not in testo
+        dati = yaml.safe_load(testo)
+        assert dati["input"]["path"] == atteso
+        assert dati["run"]["out_dir"] == "runs/città vecchia"
+
+
+def test_un_percorso_relativo_scritto_da_windows_apre_il_file_su_ogni_piattaforma(
+    tmp_path, monkeypatch
+):
+    nuvola = tmp_path / "runs" / "geoandgeo" / "01_cloud.ply"
+    nuvola.parent.mkdir(parents=True)
+    nuvola.write_text("ply\n", encoding="utf-8")
+    percorso = tmp_path / "config.yaml"
+    percorso.write_text("input:\n  path: runs\\geoandgeo\\01_cloud.ply\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = config.load_config(percorso)
+
+    assert cfg.input.path.is_file()
+    assert cfg.input.path.resolve() == nuvola.resolve()
+
+
+def test_un_percorso_assoluto_di_windows_su_un_altra_macchina_e_un_file_assente(tmp_path):
+    from meshrec.core import io
+
+    percorso = tmp_path / "config.yaml"
+    percorso.write_text("input:\n  path: C:\\Users\\mario\\nuvola.ply\n", encoding="utf-8")
+
+    cfg = config.load_config(percorso)
+
+    with pytest.raises(ValueError, match="file assente"):
+        io.read_cloud(cfg.input.path)
+
+
+def test_un_percorso_unc_resta_unc_dopo_salvataggio_e_ricarica(tmp_path):
+    from pathlib import PureWindowsPath
+
+    unc = PureWindowsPath(r"\\server\share\x.ply")
+    percorso = tmp_path / "config.yaml"
+    config.save_config(PipelineConfig(input=config.InputConfig(path=str(unc))), percorso)
+
+    riletto = PureWindowsPath(str(config.load_config(percorso).input.path))
+
+    assert riletto == unc
+    assert riletto.drive == r"\\server\share"
+
+
+def test_l_impronta_non_dipende_dal_separatore():
+    from meshrec.core import steps
+    from meshrec.core.sweep import fingerprint
+
+    windows = PipelineConfig(input=config.InputConfig(path=r"..\Nuvole di punti\muro.ply"))
+    posix = PipelineConfig(input=config.InputConfig(path="../Nuvole di punti/muro.ply"))
+
+    assert fingerprint(windows) == fingerprint(posix)
+    assert steps.step_fingerprints(windows) == steps.step_fingerprints(posix)

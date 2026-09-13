@@ -351,6 +351,8 @@ def test_a_candidate_whose_folder_cannot_be_created_becomes_a_row_and_not_an_exc
     assert row["outcome"] == "errore"
     assert row["stderr"]
     assert row["fingerprint"] == sweep.fingerprint(cfg)
+    # Il registro viaggia fra Windows e macOS: nessun separatore di Windows.
+    assert "\\" not in row["out_dir"]
 
 
 def _row(fingerprint_: str, thickness_error: float, tets: int, over: float, **extra):
@@ -749,6 +751,31 @@ def test_verify_declares_stale_a_row_whose_artifact_changed(tmp_path):
 
     assert esito[0]["stale"] is True
     assert "wall_model.inp" in esito[0]["reason"]
+
+
+def test_una_riga_scritta_su_windows_trova_i_suoi_artefatti_su_ogni_piattaforma(
+    tmp_path, monkeypatch
+):
+    """Le righe gia' scritte su Windows portano `runs\\sweep\\...`: su macOS
+    quel `\\` e' un carattere del nome, e verify e prune non troverebbero niente.
+    """
+    out_dir = tmp_path / "runs" / "sweep" / "muro" / "abc"
+    out_dir.mkdir(parents=True)
+    artefatto = out_dir / "wall_model.inp"
+    artefatto.write_text("corsa", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    riga = {
+        "fingerprint": "abc",
+        "out_dir": "runs\\sweep\\muro\\abc",
+        "artifacts_kept": True,
+        "artifacts": {"wall_model.inp": sweep.file_digest(artefatto)},
+    }
+    registry = tmp_path / "registro.jsonl"
+    sweep.append_row(registry, riga)
+
+    assert sweep.verify_registry(registry)[0]["reason"] == "coerente"
+    assert sweep.prune([riga], front=[]) == 1
+    assert not artefatto.exists()
 
 
 def test_verify_does_not_call_pruned_rows_stale(tmp_path):

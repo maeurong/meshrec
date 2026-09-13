@@ -96,7 +96,7 @@ def test_una_corsa_creata_compare_nell_elenco_con_la_sua_nuvola(slegato, nuvola)
     corpo = slegato.get("/api/corse").json()
 
     assert [voce["nome"] for voce in corpo["corse"]] == ["provino"]
-    assert corpo["corse"][0]["nuvola"] == str(nuvola)
+    assert corpo["corse"][0]["nuvola"] == nuvola.as_posix()
     assert corpo["corse"][0]["errore"] is None
     assert corpo["corrente"] == "provino"
 
@@ -154,9 +154,9 @@ def test_aprire_una_corsa_esistente_la_lega(slegato, nuvola, tmp_path):
 
     assert risposta.status_code == 200
     assert slegato.get("/api/corse").json()["corrente"] == "prima"
-    assert slegato.get("/api/config").json()["run"]["out_dir"] == str(
+    assert slegato.get("/api/config").json()["run"]["out_dir"] == (
         tmp_path / "runs" / "prima"
-    )
+    ).as_posix()
 
 
 def test_aprire_una_corsa_che_non_c_e_e_un_rifiuto_leggibile(slegato):
