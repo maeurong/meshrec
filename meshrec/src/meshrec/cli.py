@@ -237,7 +237,6 @@ def main(argv: list[str] | None = None) -> int:
         impostazioni = ServerConfig()
         if args.port is not None:
             impostazioni.port = args.port
-        indirizzo = f"http://{impostazioni.host}:{impostazioni.port}/"
 
         # La porta si prova PRIMA di annunciare l'ascolto e prima di aprire il
         # browser. Senza, il programma diceva «MeshRec in ascolto su ...» e poi
@@ -246,35 +245,57 @@ def main(argv: list[str] | None = None) -> int:
         # copia vecchia del programma, con il codice di prima. Misurato il
         # 30/08/2026 su un utente che ha lavorato per ore su un processo
         # rimasto vivo, convinto di usare la versione appena aggiornata.
-        prova = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # Come uvicorn (asyncio usa `reuse_address=True`): senza, un socket in
-        # TIME_WAIT lasciato dalla copia appena chiusa fa dire «porta gia'
-        # occupata» per ~30 s, su una porta dove il server si metterebbe in
-        # ascolto benissimo. Su POSIX contro un listener vivo il bind resta
-        # rifiutato (errno 48) -- cioe' la sonda continua a fare il suo
-        # mestiere. Su Windows no: li' SO_REUSEADDR lascia bindare SOPRA un
-        # listener attivo, e la sonda diventerebbe cieca proprio nel caso per
-        # cui esiste (MeshRec.bat e' un bersaglio spedito). Windows tiene
-        # quindi il bind nudo, TIME_WAIT compreso.
-        if sys.platform != "win32":
-            prova.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        def sonda(porta: int) -> int:
+            prova = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # Come uvicorn (asyncio usa `reuse_address=True`): senza, un socket in
+            # TIME_WAIT lasciato dalla copia appena chiusa fa dire «porta gia'
+            # occupata» per ~30 s, su una porta dove il server si metterebbe in
+            # ascolto benissimo. Su POSIX contro un listener vivo il bind resta
+            # rifiutato (errno 48) -- cioe' la sonda continua a fare il suo
+            # mestiere. Su Windows no: li' SO_REUSEADDR lascia bindare SOPRA un
+            # listener attivo, e la sonda diventerebbe cieca proprio nel caso per
+            # cui esiste (MeshRec.bat e' un bersaglio spedito). Windows tiene
+            # quindi il bind nudo, TIME_WAIT compreso.
+            if sys.platform != "win32":
+                prova.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                prova.bind((impostazioni.host, porta))
+                return prova.getsockname()[1]
+            finally:
+                prova.close()
+
         try:
-            prova.bind((impostazioni.host, impostazioni.port))
+            sonda(impostazioni.port)
         except OSError as errore:
-            print(
-                f"la porta {impostazioni.port} è già occupata su {impostazioni.host}: "
-                f"{errore.strerror or errore}.\n"
-                "Quasi sempre è un'altra copia di MeshRec rimasta aperta, e finché "
-                "resta viva il browser parla con quella — non con questa. Chiudila, "
-                "oppure scegli un'altra porta con `--port`.\n"
-                "Per trovarla: su Windows `netstat -ano | findstr :"
-                f"{impostazioni.port}` dà il PID nell'ultima colonna; su macOS e "
-                f"Linux `lsof -i :{impostazioni.port}`.",
-                file=sys.stderr,
-            )
-            return 1
-        finally:
-            prova.close()
+            if args.port is None:
+                # Porta non scelta a mano: MeshRec.app lancia `serve` nudo, e
+                # con la 8765 tenuta da un altro programma non si apriva
+                # affatto (13/09/2026). Il browser va sull'indirizzo di QUESTO
+                # processo, quindi la copia vecchia non inganna piu' nessuno.
+                # ponytail: la porta puo' sparire fra sonda e bind di uvicorn;
+                # allora il server non parte e lo dice il messaggio d'avvio.
+                occupata = impostazioni.port
+                impostazioni.port = sonda(0)
+                print(
+                    f"la porta {occupata} è occupata da un altro programma: uso la "
+                    f"{impostazioni.port}. Se è un'altra copia di MeshRec rimasta "
+                    "aperta, conviene chiuderla.",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"la porta {impostazioni.port} è già occupata su {impostazioni.host}: "
+                    f"{errore.strerror or errore}.\n"
+                    "Quasi sempre è un'altra copia di MeshRec rimasta aperta, e finché "
+                    "resta viva il browser parla con quella — non con questa. Chiudila, "
+                    "oppure scegli un'altra porta con `--port`.\n"
+                    "Per trovarla: su Windows `netstat -ano | findstr :"
+                    f"{impostazioni.port}` dà il PID nell'ultima colonna; su macOS e "
+                    f"Linux `lsof -i :{impostazioni.port}`.",
+                    file=sys.stderr,
+                )
+                return 1
+        indirizzo = f"http://{impostazioni.host}:{impostazioni.port}/"
 
         import threading
         import time

@@ -965,3 +965,124 @@ def test_i_client_sse_che_se_ne_vanno_non_lasciano_thread_appesi():
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+# --- Porta predefinita occupata ------------------------------------------------
+# Bug del 13/09/2026: la 8765 era tenuta dal server di un altro progetto e
+# MeshRec.app (che lancia `serve` senza argomenti) non si apriva. Senza `--port`
+# esplicito si prende una porta libera; con `--port` resta l'errore.
+
+
+def _predefinita(monkeypatch, porta):
+    """Sposta la porta predefinita su una porta del banco: 8765 non si tocca."""
+    import meshrec.core.config as _config
+
+    vera = _config.ServerConfig
+    monkeypatch.setattr(_config, "ServerConfig", lambda: vera(port=porta))
+
+
+def _occupante():
+    import socket as _socket
+
+    occupante = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    occupante.bind(("127.0.0.1", 0))
+    occupante.listen(1)
+    return occupante
+
+
+def test_porta_predefinita_occupata_senza_port_ne_prende_una_libera(monkeypatch, capsys):
+    occupante = _occupante()
+    occupata = occupante.getsockname()[1]
+    _predefinita(monkeypatch, occupata)
+    stato = _server_finto(monkeypatch)
+
+    def ferma_subito():
+        import time
+
+        time.sleep(0.1)
+        stato["should_exit"] = True
+
+    import threading
+
+    threading.Thread(target=ferma_subito, daemon=True).start()
+    try:
+        codice = cli.main(["serve", "--no-browser"])
+    finally:
+        occupante.close()
+
+    assert codice == 0
+    presa = stato["config"].port
+    assert presa not in (occupata, 0)
+    detto = capsys.readouterr().err
+    assert f"la porta {occupata} è occupata da un altro programma: uso la {presa}" in detto
+    assert "copia di MeshRec" in detto
+    assert f"MeshRec in ascolto su http://127.0.0.1:{presa}/" in detto
+
+
+@pytest.mark.parametrize("esplicita", [True, False])
+def test_porta_libera_si_usa_senza_avviso(monkeypatch, capsys, esplicita):
+    from meshrec.app import finestra
+
+    porta = _porta_libera()
+    argomenti = ["serve"]
+    if esplicita:
+        argomenti += ["--port", str(porta)]
+    else:
+        _predefinita(monkeypatch, porta)
+    stato = _server_finto(monkeypatch)
+    monkeypatch.setattr(finestra, "apri", lambda *a, **k: "finestra")
+
+    assert cli.main(argomenti) == 0
+    assert stato["config"].port == porta
+    assert "occupata" not in capsys.readouterr().err
+
+
+def test_porta_predefinita_in_time_wait_resta_quella(monkeypatch, capsys):
+    import socket as _socket
+
+    from meshrec.app import finestra
+
+    ascolto = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    ascolto.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+    ascolto.bind(("127.0.0.1", 0))
+    porta = ascolto.getsockname()[1]
+    ascolto.listen(1)
+    cliente = _socket.create_connection(("127.0.0.1", porta))
+    servito, _ = ascolto.accept()
+    ascolto.close()
+    servito.close()
+    cliente.close()
+
+    _predefinita(monkeypatch, porta)
+    stato = _server_finto(monkeypatch)
+    monkeypatch.setattr(finestra, "apri", lambda *a, **k: "finestra")
+    assert cli.main(["serve"]) == 0
+    assert stato["config"].port == porta
+    assert "occupata" not in capsys.readouterr().err
+
+
+def test_porta_libera_rubata_prima_di_uvicorn_si_dice(monkeypatch, capsys):
+    """La porta scelta sparisce fra sonda e bind: uvicorn esce dal suo thread
+    senza partire. Deve restare un messaggio e codice 1, non un'attesa muta."""
+    import uvicorn
+
+    class ServerSenzaPorta:
+        def __init__(self, config):
+            self.started = False
+            self.should_exit = False
+
+        def run(self):
+            return  # come uvicorn dopo un bind fallito
+
+    occupante = _occupante()
+    _predefinita(monkeypatch, occupante.getsockname()[1])
+    monkeypatch.setattr(uvicorn, "Server", ServerSenzaPorta)
+    try:
+        codice = cli.main(["serve", "--no-browser"])
+    finally:
+        occupante.close()
+
+    assert codice == 1
+    detto = capsys.readouterr().err
+    assert "non si è messo in ascolto" in detto
+    assert "Traceback" not in detto
