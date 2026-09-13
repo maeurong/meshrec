@@ -460,6 +460,41 @@ def test_il_fuori_piombo_misura_l_inclinazione_e_il_rigonfiamento_no():
     )
 
 
+@pytest.mark.parametrize("gradi", [0.0, 4.0])
+def test_il_rigonfiamento_non_dipende_dall_ultima_cifra_dei_punti(gradi):
+    """Esito discreto che dipendeva dal giro: su Windows lo stesso prisma
+    inclinato dava rigonfiamento 0 in un giro e 31,1 nel successivo. Le facce
+    di testa stanno esattamente sul bordo dell'ultima cella lungo l'asse, e un
+    errore d'arrotondamento all'ultima cifra ne mandava una parte in una riga
+    in piu', dove il massimo non trova la faccia. Rimescolare i punti o
+    spostarli di un miliardesimo di mm riproduce lo stesso arrotondamento
+    anche dove BLAS e' deterministico. Tolleranza dichiarata: 1e-6 mm."""
+    punti = synth.sample_box_surface((200.0, 140.0, 1500.0), 15.0)
+    angolo = np.radians(gradi)
+    rotazione = np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, np.cos(angolo), -np.sin(angolo)],
+        [0.0, np.sin(angolo), np.cos(angolo)],
+    ])
+    base = punti @ rotazione.T
+    rng = np.random.default_rng(0)
+    varianti = [base, base]
+    varianti += [base[rng.permutation(len(base))] for _ in range(5)]
+    varianti += [base + rng.normal(0.0, 1e-9, base.shape) for _ in range(5)]
+
+    mappe = []
+    for variante in varianti:
+        direzioni, _ = wall.terna(variante)
+        membratura = wall.misura(variante, direzioni, _cfg())
+        assert membratura.fuori_piombo_deg == pytest.approx(gradi, abs=1.0)
+        assert np.abs(membratura.rigonfiamento).max() < 20.0
+        mappe.append(np.sort(membratura.rigonfiamento))
+
+    np.testing.assert_array_equal(mappe[0], mappe[1])
+    for mappa in mappe[2:]:
+        assert mappa == pytest.approx(mappe[0], abs=1e-6)
+
+
 def test_il_rigonfiamento_e_una_mappa_e_trova_la_pancia_dove_c_e():
     """Il controllo che smentisce il precedente: una faccia gonfiata di 25 mm
     al centro deve comparire nella mappa, e nel fuori piombo no."""

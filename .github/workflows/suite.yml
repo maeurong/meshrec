@@ -89,6 +89,20 @@ jobs:
         working-directory: meshrec
         run: uv run pytest -q
 
+      # SONDA TEMPORANEA fix/windows-wall: da togliere prima del merge
+      - name: sonda wall 10 giri
+        if: always() && runner.os == 'Windows'
+        working-directory: meshrec
+        shell: bash
+        run: |
+          rossi=0
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            uv run pytest -q -p no:cacheprovider tests/test_wall.py -k "fuori_piombo_misura or ultima_cifra" > giro.txt 2>&1 || rossi=$((rossi+1))
+            echo "giro $i: $(tail -1 giro.txt)"; grep -m3 "AssertionError: assert" giro.txt || true
+          done
+          echo "giri rossi: $rossi su 10"
+          test "$rossi" -eq 0
+
   benchmark:
     name: benchmark di verifica (CalculiX)
     runs-on: ubuntu-latest
