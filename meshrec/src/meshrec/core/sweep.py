@@ -618,7 +618,7 @@ def measure_thickness_error(row: dict[str, object], source_thickness: float | No
     None quando la nuvola sorgente stessa e' risultata non bimodale: nessuno
     scarto e' calcolabile contro un valore che non esiste.
     """
-    from meshrec.core import quality
+    from meshrec.core import io, quality
     from meshrec.core.pipeline import ARTIFACTS
 
     repaired = Path(row["out_dir"]) / ARTIFACTS[6]
@@ -627,7 +627,8 @@ def measure_thickness_error(row: dict[str, object], source_thickness: float | No
     import open3d as o3d
 
     try:
-        mesh = o3d.io.read_triangle_mesh(str(repaired))
+        with io.percorso_open3d(repaired) as nativo:
+            mesh = o3d.io.read_triangle_mesh(nativo)
     except OSError:
         # File cancellato o illeggibile fra il controllo e l'apertura: nessuna
         # mesh, quindi nessuna misura, non un'eccezione che ferma lo sweep.
