@@ -44,8 +44,19 @@ def test_dopo_due_mesh_prisma_il_path_nativo_e_intero_e_git_parte(path_lungo):
     for _ in range(2):
         hexa.mesh_prisma(RETTANGOLO, np.zeros(3), np.array([0.0, 0.0, 1.0]), 1500.0, ModelConfig())
         figlio = _path_del_figlio()
-        # sonda temporanea: via prima della fine del fix
-        print(f"SONDA PATH os.environ={len(path_lungo)} nativo={len(figlio)}")
-        assert figlio.startswith(path_lungo), f"PATH nativo {len(figlio)} caratteri, atteso {len(path_lungo)}"
+        assert figlio == path_lungo, f"PATH nativo {len(figlio)} caratteri, atteso {len(path_lungo)}"
         if shutil.which("git") is not None:
             assert subprocess.run(["git", "--version"], capture_output=True).returncode == 0
+
+
+def test_un_initialize_che_solleva_lascia_comunque_il_path_intero(path_lungo, monkeypatch):
+    import gmsh
+
+    def rotto(*_args, **_kwargs):
+        os.putenv("PATH", "troncato")
+        raise RuntimeError("initialize fallito")
+
+    monkeypatch.setattr(gmsh, "initialize", rotto)
+    with pytest.raises(RuntimeError, match="initialize fallito"):
+        hexa.mesh_prisma(RETTANGOLO, np.zeros(3), np.array([0.0, 0.0, 1.0]), 1500.0, ModelConfig())
+    assert _path_del_figlio() == path_lungo

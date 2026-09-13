@@ -23,6 +23,7 @@ import numpy as np
 
 from meshrec.core import abaqus, io
 from meshrec.core.config import ModelConfig
+from meshrec.core.gmsh_backend import inizializza
 from meshrec.core.wall import ruoli_dell_incontro
 
 _ARROTONDAMENTO = 6
@@ -183,7 +184,7 @@ def mesh_prisma(
     passo = passo_di_mesh(sagoma, cfg)
     strati = max(cfg.min_layers, int(round(float(lunghezza) / passo)))
 
-    gmsh.initialize()
+    inizializza(gmsh)
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         punti = [gmsh.model.geo.addPoint(u, v, 0.0, passo) for u, v in sagoma]
@@ -381,7 +382,7 @@ def scrivi_step(prismi: list[Prisma], percorso: Path) -> dict[str, object]:
     import gmsh
 
     analitico = float(sum(volumi_analitici))
-    gmsh.initialize()
+    inizializza(gmsh)
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         occ = gmsh.model.occ
