@@ -2,12 +2,15 @@
 #
 # Due lavori, due scopi diversi, e non e' duplicazione:
 #
-# - `suite` gira su **due piattaforme** perche' PRODUCT.md dichiara che un
+# - `suite` gira su **tre piattaforme** perche' PRODUCT.md dichiara che un
 #   esito discreto dipendente dalla piattaforma e' un difetto, e questa
 #   matrice ne e' il **rilevatore**: uno di quei difetti e' gia' stato trovato
 #   (l'ordine dei voxel di Open3D fra Windows x86-64 e macOS arm64). Lo
-#   sviluppo avviene su macOS arm64, quindi e' il leg Linux a dire qualcosa
-#   di nuovo. Le grandezze **continue** non sono bit-identiche fra
+#   sviluppo avviene su macOS arm64, quindi sono i leg Linux e Windows a dire
+#   qualcosa di nuovo. Windows c'e' dal 13/09/2026: e' la piattaforma d'uso
+#   dell'autore (`MeshRec.bat`, la finestra WebView2) ed era l'unica mai
+#   coperta in CI. Le
+#   grandezze **continue** non sono bit-identiche fra
 #   architetture e i test infatti confrontano con tolleranze relative: se
 #   questa matrice diventasse rossa per l'ultima cifra, la risposta e' la
 #   tolleranza dichiarata, non l'uguaglianza esatta.
@@ -51,9 +54,9 @@ jobs:
   suite:
     name: suite (${{ matrix.os }})
     strategy:
-      fail-fast: false # il leg Linux e quello macOS si leggono insieme
+      fail-fast: false # i tre leg si leggono insieme
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
