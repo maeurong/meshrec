@@ -1,6 +1,7 @@
 """Step 1: caricamento, filtro dei non finiti, spaziatura, scala."""
 
 import ast
+import os
 import json
 from pathlib import Path
 
@@ -269,3 +270,32 @@ def test_una_mesh_scritta_in_una_corsa_accentata_si_rilegge(tmp_path, cartella):
 
     assert letti == pytest.approx(vertici)
     assert (lette == facce).all()
+
+
+def test_un_percorso_ascii_arriva_a_open3d_tale_e_quale_senza_copie(tmp_path, monkeypatch):
+    """Il costo della copia lo pagano solo i percorsi non ASCII.
+
+    Mutazione che lo uccide: togliere il ramo `isascii()` da `percorso_open3d`.
+    """
+    points = synth.sample_box_surface(SIZE, SPACING)
+    path = tmp_path / "nuvola.ply"
+    _write_ply(path, points)
+    monkeypatch.setattr(io.shutil, "copyfile", lambda *a: pytest.fail("copia inutile"))
+
+    with io.percorso_open3d(path) as nativo:
+        assert nativo == str(path)
+    assert len(io.read_cloud(path)[0]) == len(points)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="il nome corto 8.3 esiste solo su Windows")
+def test_con_temp_accentato_una_nuvola_accentata_si_legge_lo_stesso(tmp_path, monkeypatch):
+    """Il profilo `C:\\Users\\Niccolò`: anche `%TEMP%` porta l'accento."""
+    points = synth.sample_box_surface(SIZE, SPACING)
+    temp = tmp_path / "Niccolò_Temp"
+    temp.mkdir()
+    monkeypatch.setattr(io.tempfile, "tempdir", str(temp))
+    path = tmp_path / "Rilievo_città" / "nuvola.ply"
+    path.parent.mkdir()
+    io.write_cloud(path, points)
+
+    assert io.read_cloud(path)[0] == pytest.approx(points, abs=1e-3)

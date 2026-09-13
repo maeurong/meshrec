@@ -98,13 +98,19 @@ def _write_mesh(path: Path, vertices: np.ndarray, faces: np.ndarray) -> None:
         o3d.utility.Vector3dVector(np.asarray(vertices, dtype=np.float64)),
         o3d.utility.Vector3iVector(np.asarray(faces, dtype=np.int32)),
     )
-    io.scrivi_atomico(path, lambda destinazione: o3d.io.write_triangle_mesh(str(destinazione), mesh))
+
+    def scrivi(destinazione: Path) -> None:
+        with io.percorso_open3d(destinazione, scrittura=True) as nativo:
+            o3d.io.write_triangle_mesh(nativo, mesh)
+
+    io.scrivi_atomico(path, scrivi)
 
 
 def _read_mesh(path: Path) -> tuple[np.ndarray, np.ndarray]:
     import open3d as o3d
 
-    mesh = o3d.io.read_triangle_mesh(str(path))
+    with io.percorso_open3d(path) as nativo:
+        mesh = o3d.io.read_triangle_mesh(nativo)
     vertices = np.ascontiguousarray(np.asarray(mesh.vertices), dtype=np.float64)
     faces = np.ascontiguousarray(np.asarray(mesh.triangles), dtype=np.int64)
     # open3d NON solleva su file assente: scrive un avviso su stderr e torna una
