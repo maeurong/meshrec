@@ -348,12 +348,16 @@ def prepara_ingresso(
         # Lo spostamento si misura e si registra, non ferma lo step
         # (decisione del 21/09/2026: sul caso reale il massimo viene dalle
         # cavita' piu' strette di alpha, che il wrap chiude per costruzione,
-        # e col limite lo step falliva a ogni tolleranza). Il passo di default
-        # di spostamento() (1% della diagonale) sottostima sui difetti locali (misurato: ~30 mm contro un vero 30,82 mm sulla
-        # sfera col polo passante, wrap 5 mm). tol/5 raggiunge gia' il valore
-        # a cui il campionamento converge (uguale a tol/10, la meta' dei
-        # punti); tol stesso no (29,86 mm, sotto soglia). 21/09/2026.
-        distanza = spostamento(vertices, faces, wv, wf, passo_mm=cfg.wrap_tolerance / 5.0)
+        # e col limite lo step falliva a ogni tolleranza).
+        # ponytail: passo = max(tol/5, spigolo mediano dell'ingresso). Stima su
+        # campioni: sotto passi grossi puo' sottostimare di qualche % (polo
+        # passante, sfera grossolana: 28,76 mm contro >= 30,38 veri). Il
+        # minimo toglie anche l'esplosione dei campioni con tolleranze
+        # minuscole; sul caso reale 121 s invece di 295 col massimo identico
+        # (28,58 mm). Serve una misura piu' fine: abbassare il minimo.
+        lati = np.linalg.norm(vertices[faces] - vertices[np.roll(faces, 1, axis=1)], axis=2)
+        passo = max(cfg.wrap_tolerance / 5.0, float(np.median(lati)))
+        distanza = spostamento(vertices, faces, wv, wf, passo_mm=passo)
         misure.update(del_wrap)
         misure.update(
             wrap_applied=True,

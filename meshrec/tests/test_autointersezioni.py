@@ -184,14 +184,19 @@ def test_convergenza_non_dichiarata_con_zero_residue_non_dice_zero_restano(monke
 def test_il_wrap_oltre_la_tolleranza_registra_lo_spostamento_e_non_ferma():
     """Tolleranza dichiarativa (decisione di Mario, 21/09/2026): sul caso reale
     il massimo viene dalle cavita' piu' strette di alpha, che il wrap chiude
-    per costruzione, e col limite lo step falliva a ogni valore. 30,38 mm e'
-    il massimo che il Montecarlo di PyMeshLab aveva trovato su questa coppia."""
+    per costruzione, e col limite lo step falliva a ogni valore.
+
+    28,0 e non 30,38 (il massimo del Montecarlo su questa coppia): qui il
+    passo lo sceglie `prepara_ingresso`, ed e' lo spigolo mediano (7,85 mm
+    su questa sfera grossolana), che misura 28,76. Una sottostima di qualche
+    % non fa passare nulla di nascosto, la tolleranza non ferma piu'. Il
+    30,38 resta nel test di `spostamento` a passo esplicito."""
     v, f = _sfera((0.0, 0.0, -70.0))
     _, _, misure, cambiata = ai.prepara_ingresso(
         v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False
     )
     assert cambiata is True
-    assert misure["wrap_hausdorff_max_mm"] >= 30.38
+    assert misure["wrap_hausdorff_max_mm"] >= 28.0
     assert misure["wrap_hausdorff_mean_mm"] <= misure["wrap_hausdorff_p95_mm"] <= misure["wrap_hausdorff_max_mm"]
 
 
@@ -202,6 +207,45 @@ def test_il_wrap_di_una_superficie_senza_ingombro_e_un_valueerror_leggibile():
     f = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]], dtype=np.int64)
     with pytest.raises(ValueError, match="diagonale"):
         ai.prepara_ingresso(v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False)
+
+
+def test_una_tolleranza_minuscola_non_fa_esplodere_la_misura(monkeypatch):
+    """Il passo e' tol/5 ma mai sotto lo spigolo mediano dell'ingresso: con
+    tol 1e-6 il passo tol/5 chiederebbe ~500 000 punti per faccia (tetto
+    1000 suddivisioni), centinaia di milioni sulla sfera."""
+    import time
+
+    v, f = _sfera()
+    lati = np.linalg.norm(v[f] - v[np.roll(f, 1, axis=1)], axis=2)
+    monkeypatch.setattr(ai, "avvolgi", lambda v, f, tol: (v, f, {"wrap_alpha_mm": tol}))
+    vero = ai.spostamento
+
+    def controllato(*args, passo_mm):
+        assert passo_mm >= float(np.median(lati))
+        return vero(*args, passo_mm=passo_mm)
+
+    monkeypatch.setattr(ai, "spostamento", controllato)
+    avvio = time.perf_counter()
+    _, _, misure, _ = ai.prepara_ingresso(
+        v, f, config.TetConfig(wrap_tolerance=1e-6), step_8_acceso=False
+    )
+    assert time.perf_counter() - avvio < 30.0
+    assert misure["wrap_hausdorff_max_mm"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_il_wrap_entro_tolleranza_sostituisce_e_dichiara(monkeypatch):
+    chiamate = []
+    monkeypatch.setattr(ai, "pulisci_autointersezioni", lambda *a: chiamate.append(a))
+    v, f = _sfera()
+    _, _, misure, cambiata = ai.prepara_ingresso(
+        v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False
+    )
+    assert cambiata is True and chiamate == []
+    assert misure["wrap_applied"] is True
+    assert misure["wrap_hausdorff_max_mm"] == pytest.approx(0.5, abs=0.05)
+    assert misure["wrap_volume_after"] > misure["wrap_volume_before"]
+    assert misure["wrap_note"] == "superficie sostituita, non riparata"
+    assert misure["meshfix_clean_converged"] is None
 
 
 # Le 4 righe aggiunte dall'architect al contratto ingressi: nessun test sopra
