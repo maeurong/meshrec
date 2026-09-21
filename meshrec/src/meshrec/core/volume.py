@@ -100,9 +100,13 @@ def _diagnosi_del_guasto(messaggio: str, nobisect: bool) -> str:
         return (
             "il guasto è nel recupero delle facce di ingresso, prima "
             "che il raffinamento cominciasse: il vincolo raggio-spigolo non è "
-            "ancora entrato in gioco e cambiarlo non sposta nulla. La causa "
-            "tipica sono le autointersezioni della superficie, e il rimedio sta "
-            "a monte, negli step 6 e 8."
+            "ancora entrato in gioco e cambiarlo non sposta nulla. Le cause sono "
+            "le autointersezioni della superficie, che lo step 9 conta e pulisce "
+            "prima di arrivare qui, oppure geometria quasi degenere che TetGen non "
+            "recupera anche senza autointersezioni (pieghe, segmenti quasi "
+            "sovrapposti). Il ripiego è tet.wrap_tolerance: la superficie viene "
+            "sostituita da un alpha wrap, con il volume gonfiato dell'offset e le "
+            "cavità più strette della tolleranza perse."
         )
     if "split_subface" in messaggio and not nobisect:
         return (

@@ -172,8 +172,9 @@ def test_il_recupero_del_bordo_non_e_un_problema_di_qualita(monkeypatch):
 
     E' il recupero delle facce di ingresso nella triangolazione di Delaunay: il
     vincolo raggio-spigolo non e' ancora entrato in gioco, quindi consigliarlo
-    e' falso a prescindere dalla geometria. La causa tipica sono le
-    autointersezioni della superficie, e il rimedio sta a monte.
+    e' falso a prescindere dalla geometria. Le autointersezioni sono una
+    causa, non l'unica: su runs/geoandgeo-mm fallisce anche una superficie
+    che TetGen `-d` dichiara corretta.
     """
     monkeypatch.setattr(
         volume.tetgen,
@@ -190,6 +191,8 @@ def test_il_recupero_del_bordo_non_e_un_problema_di_qualita(monkeypatch):
     messaggio = str(caduta.value)
     assert "Alza tet.min_ratio" not in messaggio
     assert "nobisect" not in messaggio
+    assert "tet.wrap_tolerance" in messaggio
+    assert "sostituita" in messaggio
 
 
 def test_un_guasto_che_non_si_riconosce_non_viene_diagnosticato(monkeypatch):
