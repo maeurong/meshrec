@@ -93,66 +93,164 @@ def avvolgi(
     return wv, wf, {"wrap_alpha_mm": tolleranza, "wrap_offset_mm": offset, "wrap_seconds": secondi}
 
 
-def _campioni_deterministici(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
-    """Vertici, baricentri delle facce, punti medi degli spigoli: niente Montecarlo.
+# Tetto ai punti per faccia: un difetto che chiede un passo assurdamente fine
+# su un lato enorme (spigolo degenere) si ferma qui, non satura la macchina.
+# 1000 e' abbondante: il caso peggiore misurato (polo passante, passo 0,25 mm,
+# spigolo 119,6 mm) ne chiede 479.
+_N_MAX_SUBDIVISIONI_PER_FACCIA = 1000
 
-    `get_hausdorff_distance` con `sampleface=True` campiona l'interno delle
-    facce a caso, e la versione installata di PyMeshLab non espone un seme
-    (verificato con `pymeshlab.print_filter_parameter_list('get_hausdorff_distance')`,
-    21/09/2026: nessun parametro di seme in lista). Stessi ingressi, valori
-    diversi a ogni chiamata — misurato: 29,85/30,11/30,11/30,38/... mm sulla
-    stessa coppia. Questi punti sono fissi, quindi lo e' anche il campione.
+
+def _diagonale(vertices: np.ndarray) -> float:
+    v = np.asarray(vertices, dtype=np.float64)
+    if len(v) == 0:
+        return 0.0
+    return float(np.linalg.norm(v.max(axis=0) - v.min(axis=0)))
+
+
+def _campioni_deterministici(vertices: np.ndarray, faces: np.ndarray, passo: float) -> np.ndarray:
+    """Vertici piu' una griglia baricentrica per faccia, passo `passo` (mm).
+
+    Questi punti sono generati da sole operazioni numpy sui vertici e le
+    facce d'ingresso: stessa chiamata, stesso array, byte per byte (vedi
+    `spostamento` per la parte non deterministica che questi punti bypassano).
+
+    Un solo campione per faccia (baricentro) sottostima quando il triangolo e'
+    grande o degenere: sulla sfera col polo passante mancavano ~9 mm rispetto
+    al massimo trovato dal Montecarlo. La griglia (i/n, j/n) per faccia, con
+    `n = ceil(spigolo piu' lungo / passo)`, chiude il buco: piu' fine e' il
+    passo, piu' vicino al vero massimo, al prezzo di piu' punti.
     """
     v = np.asarray(vertices, dtype=np.float64)
     f = np.asarray(faces, dtype=np.int64)
-    baricentri = v[f].mean(axis=1)
-    spigoli = np.concatenate([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]])
-    punti_medi = v[spigoli].mean(axis=1)
-    return np.ascontiguousarray(np.vstack([v, baricentri, punti_medi]))
+    if len(f) == 0:
+        return v
+    a, b, c = v[f[:, 0]], v[f[:, 1]], v[f[:, 2]]
+    lati = np.stack(
+        [np.linalg.norm(b - a, axis=1), np.linalg.norm(c - b, axis=1), np.linalg.norm(a - c, axis=1)],
+        axis=1,
+    )
+    n_per_faccia = np.clip(
+        np.ceil(lati.max(axis=1) / passo).astype(np.int64), 1, _N_MAX_SUBDIVISIONI_PER_FACCIA
+    )
+    punti = [v]
+    for n in np.unique(n_per_faccia):
+        sel = n_per_faccia == n
+        ij = np.array([(i, j) for i in range(n + 1) for j in range(n + 1 - i)], dtype=np.float64)
+        u, w = (ij[:, 0] / n)[None, :, None], (ij[:, 1] / n)[None, :, None]
+        griglia = a[sel][:, None, :] + u * (b[sel] - a[sel])[:, None, :] + w * (c[sel] - a[sel])[:, None, :]
+        punti.append(griglia.reshape(-1, 3))
+    return np.ascontiguousarray(np.vstack(punti))
+
+
+# Candidati per punto nella ricerca del piu' vicino: 8 triangoli vicini per
+# centroide bastano su una mesh ragionevole (non aghi ovunque); il lotto
+# sotto tiene il picco di memoria basso indipendentemente da quanti punti.
+_CANDIDATI_PER_PUNTO = 8
+_LOTTO_PUNTI = 20_000
+
+
+def _punto_piu_vicino_su_triangolo(p: np.ndarray, a: np.ndarray, b: np.ndarray, c: np.ndarray) -> np.ndarray:
+    """Distanza esatta punto-triangolo, vettoriale (Ericson, *Real-Time Collision
+    Detection*, 5.1.5: regione piu' vicina per proiezione baricentrica)."""
+    ab, ac, ap = b - a, c - a, p - a
+    d1, d2 = np.sum(ab * ap, axis=-1), np.sum(ac * ap, axis=-1)
+    bp = p - b
+    d3, d4 = np.sum(ab * bp, axis=-1), np.sum(ac * bp, axis=-1)
+    cp = p - c
+    d5, d6 = np.sum(ab * cp, axis=-1), np.sum(ac * cp, axis=-1)
+    vc, vb_, va_ = d1 * d4 - d3 * d2, d5 * d2 - d1 * d6, d3 * d6 - d5 * d4
+
+    denom = va_ + vb_ + vc
+    denom = np.where(denom == 0, 1.0, denom)
+    interno = a + ab * (vb_ / denom)[..., None] + ac * (vc / denom)[..., None]
+    su_ab = a + np.clip(d1 / np.where(d1 - d3 == 0, 1.0, d1 - d3), 0.0, 1.0)[..., None] * ab
+    su_ac = a + np.clip(d2 / np.where(d2 - d6 == 0, 1.0, d2 - d6), 0.0, 1.0)[..., None] * ac
+    su_bc = b + np.clip(
+        (d4 - d3) / np.where((d4 - d3) + (d5 - d6) == 0, 1.0, (d4 - d3) + (d5 - d6)), 0.0, 1.0
+    )[..., None] * (c - b)
+
+    punto = interno.copy()
+    punto = np.where(((va_ <= 0) & (d4 - d3 >= 0) & (d5 - d6 >= 0))[..., None], su_bc, punto)
+    punto = np.where(((vb_ <= 0) & (d2 >= 0) & (d6 <= 0))[..., None], su_ac, punto)
+    punto = np.where(((vc <= 0) & (d1 >= 0) & (d3 <= 0))[..., None], su_ab, punto)
+    punto = np.where(((d6 >= 0) & (d5 <= d6))[..., None], c, punto)
+    punto = np.where(((d3 >= 0) & (d4 <= d3))[..., None], b, punto)
+    punto = np.where(((d1 <= 0) & (d2 <= 0))[..., None], a, punto)
+    return np.linalg.norm(p - punto, axis=-1)
+
+
+def _distanza_punti_a_superficie(punti: np.ndarray, vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    """Distanza minima, esatta, da ogni punto alla superficie continua (non ai suoi vertici).
+
+    Il candidato e' l'insieme delle `_CANDIDATI_PER_PUNTO` facce coi centroidi
+    piu' vicini (KDTree), poi la proiezione esatta sceglie il punto. A lotti,
+    cosi' il picco di memoria non dipende da quanti punti misuriamo insieme.
+    """
+    from scipy.spatial import cKDTree
+
+    a = vertices[faces[:, 0]]
+    b = vertices[faces[:, 1]]
+    c = vertices[faces[:, 2]]
+    albero = cKDTree((a + b + c) / 3.0)
+    k = min(_CANDIDATI_PER_PUNTO, len(faces))
+    distanze = np.empty(len(punti))
+    for i in range(0, len(punti), _LOTTO_PUNTI):
+        lotto = punti[i : i + _LOTTO_PUNTI]
+        _, idx = albero.query(lotto, k=k)
+        if k == 1:
+            idx = idx[:, None]
+        d = _punto_piu_vicino_su_triangolo(lotto[:, None, :], a[idx], b[idx], c[idx])
+        distanze[i : i + _LOTTO_PUNTI] = d.min(axis=1)
+    return distanze
 
 
 def spostamento(
-    va: np.ndarray, fa: np.ndarray, vb: np.ndarray, fb: np.ndarray
+    va: np.ndarray,
+    fa: np.ndarray,
+    vb: np.ndarray,
+    fb: np.ndarray,
+    passo_mm: float | None = None,
 ) -> dict[str, float]:
-    """Hausdorff nei due versi fra due superfici, su campioni fissi (deterministico).
+    """Distanza punto-superficie nei due versi, deterministico.
 
-    Il campione e' `_campioni_deterministici`: vertici, baricentri e punti
-    medi degli spigoli, misurati con `samplevert=True` soltanto (nessun
-    Montecarlo). Il solo campionamento dei vertici sottostimerebbe l'errore
-    dove i triangoli sono grandi (`quality.geometric_error`,
-    meshrec/src/meshrec/core/quality.py:519-526); qui i baricentri e i punti
-    medi coprono anche l'interno delle facce, senza il dado del Montecarlo.
+    I campioni sono `_campioni_deterministici`: il solo campionamento dei
+    vertici sottostimerebbe l'errore dove i triangoli sono grandi
+    (`quality.geometric_error`, meshrec/src/meshrec/core/quality.py:519-526),
+    la griglia copre anche l'interno delle facce. La distanza e' verso la
+    superficie **continua** dell'altra mesh (`_distanza_punti_a_superficie`,
+    proiezione esatta sul triangolo), non verso i suoi campioni: misurare
+    punto-contro-punti-campionati sottostima anche su una superficie liscia
+    (misurato: 1,05 mm invece di 0,5 mm sulla sfera pulita, wrap 5 mm).
+
+    Il filtro `get_hausdorff_distance` di PyMeshLab, verificato in sessione,
+    non e' deterministico nemmeno con `sampleface=False, samplevert=True` su
+    una nuvola di punti gia' fissi: stessa coppia, stessi campioni, `max`
+    diverso a ogni chiamata (jitter ~0,003 mm, sorgente interna alla
+    libreria). Per questo la distanza qui e' calcolata in numpy/scipy, gia'
+    dipendenze del progetto, non con quel filtro.
+
+    `passo_mm` e' il passo (mm) della griglia; se `None` e' l'1 % della
+    diagonale piu' grande fra le due superfici — sulla superficie reale
+    (facce a lato ~1 % della diagonale) tiene un punto a faccia, veloce
+    (159 200 facce, 557 202 campioni, ~2 s, misurato su una sfera fitta).
+    Chi conosce una tolleranza piu' stretta (`prepara_ingresso`, col wrap)
+    passa un passo piu' fine: la tolleranza e' un limite, non
+    un'indicazione, e un campione troppo rado la farebbe rispettare per caso.
+
     `mean` e' il **massimo** delle due medie direzionali: nome ingannevole ma
     voluto, cautelativo.
     """
-    import pymeshlab
-
-    mesh_set = _mesh_set(va, fa)  # 0: superficie A
-    mesh_set.add_mesh(
-        pymeshlab.Mesh(np.asarray(vb, dtype=np.float64), np.asarray(fb, dtype=np.int32))
-    )  # 1: superficie B
-    mesh_set.add_mesh(pymeshlab.Mesh(_campioni_deterministici(va, fa)))  # 2: campioni di A
-    mesh_set.add_mesh(pymeshlab.Mesh(_campioni_deterministici(vb, fb)))  # 3: campioni di B
-    versi = {}
-    for nome, campionata, bersaglio in (
-        ("max_a_verso_b", 2, 1),
-        ("max_b_verso_a", 3, 0),
-    ):
-        versi[nome] = dict(
-            mesh_set.apply_filter(
-                "get_hausdorff_distance",
-                sampledmesh=campionata,
-                targetmesh=bersaglio,
-                samplevert=True,
-                sampleface=False,
-                maxdist=pymeshlab.PercentageValue(100.0),
-            )
-        )
+    if passo_mm is None:
+        passo_mm = 0.01 * max(_diagonale(va), _diagonale(vb))
+    campioni_a = _campioni_deterministici(va, fa, passo_mm)
+    campioni_b = _campioni_deterministici(vb, fb, passo_mm)
+    d_a_verso_b = _distanza_punti_a_superficie(campioni_a, vb, fb)
+    d_b_verso_a = _distanza_punti_a_superficie(campioni_b, va, fa)
     return {
-        "max_a_verso_b": float(versi["max_a_verso_b"]["max"]),
-        "max_b_verso_a": float(versi["max_b_verso_a"]["max"]),
-        "max": max(float(r["max"]) for r in versi.values()),
-        "mean": max(float(r["mean"]) for r in versi.values()),
+        "max_a_verso_b": float(d_a_verso_b.max()),
+        "max_b_verso_a": float(d_b_verso_a.max()),
+        "max": float(max(d_a_verso_b.max(), d_b_verso_a.max())),
+        "mean": float(max(d_a_verso_b.mean(), d_b_verso_a.mean())),
     }
 
 
@@ -184,7 +282,13 @@ def prepara_ingresso(
     if cfg.wrap_tolerance is not None:
         # Col wrap MeshFix non serve: la superficie viene rifatta comunque.
         wv, wf, del_wrap = avvolgi(vertices, faces, cfg.wrap_tolerance)
-        distanza = spostamento(vertices, faces, wv, wf)
+        # La tolleranza qui sotto e' un limite vero, non un'indicazione: il
+        # passo di default di spostamento() (1% della diagonale) sottostima
+        # sui difetti locali (misurato: ~30 mm contro un vero 30,82 mm sulla
+        # sfera col polo passante, wrap 5 mm). tol/5 raggiunge gia' il valore
+        # a cui il campionamento converge (uguale a tol/10, la meta' dei
+        # punti); tol stesso no (29,86 mm, sotto soglia). 21/09/2026.
+        distanza = spostamento(vertices, faces, wv, wf, passo_mm=cfg.wrap_tolerance / 5.0)
         misure.update(del_wrap)
         misure.update(
             wrap_applied=True,

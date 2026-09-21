@@ -64,12 +64,28 @@ def test_due_superfici_identiche_non_si_spostano():
 
 
 def test_spostamento_e_deterministico():
-    """`get_hausdorff_distance` con sampleface=True e' Montecarlo senza seme
-    esposto (verificato con pymeshlab.print_filter_parameter_list, 21/09/2026):
-    stessi ingressi, valori diversi a ogni chiamata. Qui devono coincidere."""
+    """`get_hausdorff_distance` di PyMeshLab (commit 64b6220, prima del fix
+    round 2) non era deterministico nemmeno su campioni fissi: jitter interno
+    alla libreria, non al campionamento (verificato in sessione, 21/09/2026).
+    `spostamento` ora misura con `scipy.spatial.cKDTree`: stessi ingressi,
+    stesso dict, byte per byte."""
     v, f = _sfera((0.0, 0.0, -70.0))
     wv, wf, _ = ai.avvolgi(v, f, 5.0)
     assert ai.spostamento(v, f, wv, wf) == ai.spostamento(v, f, wv, wf)
+
+
+def test_spostamento_non_sottostima_il_polo_passante():
+    """Il campionamento Montecarlo di PyMeshLab (commit 64b6220, prima del fix
+    round 2) aveva trovato punti fino a 30,38 mm su questa stessa coppia (9
+    chiamate, 21/09/2026: 29,39-30,38). Lo spostamento vero e' quindi
+    >= 30,38 mm: un campionamento fisso troppo rado (solo
+    vertici+baricentri+punti medi, ~21 mm) lo mancherebbe, e la tolleranza
+    deve essere un limite vero, non un'indicazione. `passo_mm` qui e' lo
+    stesso tol/5 che usa `prepara_ingresso` (vedi il suo commento: misurato
+    30,82 mm, sopra soglia)."""
+    v, f = _sfera((0.0, 0.0, -70.0))
+    wv, wf, _ = ai.avvolgi(v, f, 5.0)
+    assert ai.spostamento(v, f, wv, wf, passo_mm=5.0 / 5.0)["max"] >= 30.38
 
 
 # Le due righe segnalate dall'architect come scoperte dallo Step 1.
