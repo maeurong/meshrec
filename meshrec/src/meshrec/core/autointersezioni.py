@@ -7,6 +7,7 @@ Vedi docs/ricerca/2026-09-21-autointersezioni-e-degeneri.md.
 
 from __future__ import annotations
 
+import math
 import time
 
 import numpy as np
@@ -226,51 +227,27 @@ def _distanza_punti_a_superficie(punti: np.ndarray, vertices: np.ndarray, faces:
     return distanze
 
 
-def _somma_esatta_aggiungi(parziali: list[float], x: float) -> None:
-    """Aggiunge `x` a una somma esatta a lotti (Shewchuk/Hettinger msum, ricetta
-    ASPN 393090 — lo stesso algoritmo dietro `math.fsum`).
-
-    La somma in virgola mobile non e' associativa: `(a+b)+c` puo' differire
-    da `a+(b+c)` nell'ultimo bit. `parziali` tiene una scomposizione esatta
-    (non arrotondata) della somma finora; il totale (`sum(parziali)`, un solo
-    arrotondamento alla fine) non dipende dall'ordine o dal raggruppamento
-    in cui i valori arrivano — necessario perche' la media non deve cambiare
-    con la dimensione del lotto.
-    """
-    i = 0
-    for y in parziali:
-        if abs(x) < abs(y):
-            x, y = y, x
-        alto = x + y
-        basso = y - (alto - x)
-        if basso != 0.0:
-            parziali[i] = basso
-            i += 1
-        x = alto
-    parziali[i:] = [x]
-
-
 def _distanza_massima_e_media(vertices: np.ndarray, faces: np.ndarray, passo: float, verso_v: np.ndarray, verso_f: np.ndarray) -> tuple[float, float]:
     """Massimo e media della distanza dai campioni di (vertices, faces) verso l'altra superficie.
 
     A lotti (`_lotti_di_campioni`): massimo e somma/conteggio si aggiornano
     lotto per lotto, cosi' non serve mai avere tutti i campioni in memoria
-    insieme. La somma usa `_somma_esatta_aggiungi` (non un `+=` diretto)
-    perche' la media deve restare identica qualunque sia la dimensione del
-    lotto, e la somma in virgola mobile normale non lo garantisce.
+    insieme. Ogni lotto si somma con `math.fsum` (esatta, in C), poi le somme
+    dei lotti con un altro `math.fsum`: deterministica a lotto fisso, e la
+    dimensione del lotto e' una costante. Cambiarla puo' spostare la media
+    nell'ultimo bit (due arrotondamenti, non uno); il massimo no.
     """
     massimo = 0.0
-    parziali: list[float] = []
+    somme: list[float] = []
     conteggio = 0
     for lotto in _lotti_di_campioni(vertices, faces, passo):
         if len(lotto) == 0:
             continue
         d = _distanza_punti_a_superficie(lotto, verso_v, verso_f)
         massimo = max(massimo, float(d.max()))
-        for x in d:
-            _somma_esatta_aggiungi(parziali, float(x))
+        somme.append(math.fsum(d))
         conteggio += len(d)
-    return massimo, (sum(parziali) / conteggio if conteggio else 0.0)
+    return massimo, (math.fsum(somme) / conteggio if conteggio else 0.0)
 
 
 def spostamento(

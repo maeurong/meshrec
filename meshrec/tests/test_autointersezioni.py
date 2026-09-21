@@ -267,10 +267,19 @@ def test_i_lotti_di_campioni_restano_sotto_il_budget_anche_su_molte_facce():
 
 def test_spostamento_e_indipendente_dalla_dimensione_del_lotto(monkeypatch):
     """Una faccia o un lotto parziale finale non deve cambiare il risultato:
-    stessa mesh, lotto piu' piccolo, stesso dict."""
+    stessa mesh, lotto piu' piccolo. I massimi identici; le medie a meno
+    dell'ultimo bit, perche' la somma e' esatta per lotto, non fra lotti."""
     v, f = _sfera((0.0, 0.0, -70.0))
     wv, wf, _ = ai.avvolgi(v, f, 5.0)
     con_lotto_grande = ai.spostamento(v, f, wv, wf, passo_mm=1.0)
     monkeypatch.setattr(ai, "_PUNTI_PER_LOTTO_CAMPIONI", 500)
     con_lotto_piccolo = ai.spostamento(v, f, wv, wf, passo_mm=1.0)
-    assert con_lotto_grande == con_lotto_piccolo
+    for chiave in ("max_a_verso_b", "max_b_verso_a", "max"):
+        assert con_lotto_grande[chiave] == con_lotto_piccolo[chiave]
+    assert con_lotto_grande["mean"] == pytest.approx(con_lotto_piccolo["mean"], rel=1e-12)
+
+
+def test_nessun_campione_da_media_zero():
+    v, f = _sfera()
+    vuoti_v, vuoti_f = np.empty((0, 3)), np.empty((0, 3), dtype=np.int64)
+    assert ai._distanza_massima_e_media(vuoti_v, vuoti_f, 1.0, v, f) == (0.0, 0.0)
