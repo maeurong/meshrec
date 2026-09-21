@@ -1,0 +1,2 @@
+{"derived_from": {"path": "https://pypi.org/pypi/meshlib/3.1.4.297/json", "sha256": "2e1086241aad5bc12b7d8e0a38ff1f1c48fef5cd24b3e90a9a47eb375387f1fe", "bytes": 19822},
+ "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}

@@ -1,0 +1,2 @@
+{"derived_from": {"path": "https://pypi.org/pypi/cgal/6.0.1.post202410241521/json", "sha256": "2e8df73d70d5f91d18bfa9f18cea6e907815a1bb24f8d14dbc6b0dbc37ffd21f", "bytes": 19493},
+ "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}

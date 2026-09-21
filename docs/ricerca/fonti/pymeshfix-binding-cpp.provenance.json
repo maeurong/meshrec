@@ -1,0 +1,2 @@
+{"derived_from": {"path": "https://raw.githubusercontent.com/pyvista/pymeshfix/HEAD/src/_meshfix.cpp", "sha256": "780f55c4a9bfd84dd83e12af77b7efa2edd5691980e8c4be48cf02dc09f13764", "bytes": 21827},
+ "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}

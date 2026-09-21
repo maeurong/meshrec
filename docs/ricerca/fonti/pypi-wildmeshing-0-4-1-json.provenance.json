@@ -1,0 +1,2 @@
+{"derived_from": {"path": "https://pypi.org/pypi/wildmeshing/0.4.1/json", "sha256": "01779e4156e04988f3673567a7c395fd5dc6dd941418d6eacf64bf4c37cf601e", "bytes": 14634},
+ "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}

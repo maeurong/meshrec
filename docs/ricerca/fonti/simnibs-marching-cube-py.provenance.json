@@ -1,0 +1,2 @@
+{"derived_from": {"path": "https://raw.githubusercontent.com/simnibs/simnibs/HEAD/simnibs/segmentation/marching_cube.py", "sha256": "96bd71687a2f75b7d6e6f245131662200f1ff22e2f54aceeef52e7395fe8d148", "bytes": 10474},
+ "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}
