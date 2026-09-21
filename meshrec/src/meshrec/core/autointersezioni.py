@@ -107,23 +107,37 @@ def _diagonale(vertices: np.ndarray) -> float:
     return float(np.linalg.norm(v.max(axis=0) - v.min(axis=0)))
 
 
-def _campioni_deterministici(vertices: np.ndarray, faces: np.ndarray, passo: float) -> np.ndarray:
-    """Vertici piu' una griglia baricentrica per faccia, passo `passo` (mm).
+# Budget di punti per lotto durante la generazione dei campioni. Round 2
+# costruiva tutta la griglia in un colpo solo (`np.vstack`): su una
+# superficie reale (1-4 M facce, spigoli 10-20 mm, passo tol/5) sono
+# centinaia di milioni di punti, OOM (misurato: sistema ucciso per pressione
+# di memoria durante lo sviluppo, 21/09/2026). Qui il picco di memoria
+# dipende da questa costante, non dal totale della mesh.
+_PUNTI_PER_LOTTO_CAMPIONI = 200_000
 
-    Questi punti sono generati da sole operazioni numpy sui vertici e le
-    facce d'ingresso: stessa chiamata, stesso array, byte per byte (vedi
-    `spostamento` per la parte non deterministica che questi punti bypassano).
 
-    Un solo campione per faccia (baricentro) sottostima quando il triangolo e'
-    grande o degenere: sulla sfera col polo passante mancavano ~9 mm rispetto
-    al massimo trovato dal Montecarlo. La griglia (i/n, j/n) per faccia, con
-    `n = ceil(spigolo piu' lungo / passo)`, chiude il buco: piu' fine e' il
-    passo, piu' vicino al vero massimo, al prezzo di piu' punti.
+def _lotti_di_campioni(vertices: np.ndarray, faces: np.ndarray, passo: float):
+    """Vertici piu' una griglia baricentrica per faccia, passo `passo` (mm), a lotti.
+
+    Stesso punto di `_campioni_deterministici` di prima (round 2): un solo
+    campione per faccia (baricentro) sottostima quando il triangolo e' grande
+    o degenere — sulla sfera col polo passante mancavano ~9 mm rispetto al
+    massimo trovato dal Montecarlo. La griglia (i/n, j/n) per faccia, con
+    `n = ceil(spigolo piu' lungo / passo)`, chiude il buco.
+
+    La differenza e' che qui i punti escono a lotti (`yield`), non tutti
+    insieme: ogni lotto resta sotto `_PUNTI_PER_LOTTO_CAMPIONI` (salvo una
+    singola faccia che da sola lo supera gia' — capita solo su un unico
+    spigolo enorme, il tetto `_N_MAX_SUBDIVISIONI_PER_FACCIA` la tiene comunque
+    limitata). Ogni lotto e' generato dalle stesse operazioni numpy
+    deterministiche di prima: stessa chiamata, stessi lotti, byte per byte.
     """
     v = np.asarray(vertices, dtype=np.float64)
     f = np.asarray(faces, dtype=np.int64)
+    if len(v) > 0:
+        yield v
     if len(f) == 0:
-        return v
+        return
     a, b, c = v[f[:, 0]], v[f[:, 1]], v[f[:, 2]]
     lati = np.stack(
         [np.linalg.norm(b - a, axis=1), np.linalg.norm(c - b, axis=1), np.linalg.norm(a - c, axis=1)],
@@ -132,19 +146,27 @@ def _campioni_deterministici(vertices: np.ndarray, faces: np.ndarray, passo: flo
     n_per_faccia = np.clip(
         np.ceil(lati.max(axis=1) / passo).astype(np.int64), 1, _N_MAX_SUBDIVISIONI_PER_FACCIA
     )
-    punti = [v]
     for n in np.unique(n_per_faccia):
-        sel = n_per_faccia == n
+        idx = np.flatnonzero(n_per_faccia == n)
         ij = np.array([(i, j) for i in range(n + 1) for j in range(n + 1 - i)], dtype=np.float64)
         u, w = (ij[:, 0] / n)[None, :, None], (ij[:, 1] / n)[None, :, None]
-        griglia = a[sel][:, None, :] + u * (b[sel] - a[sel])[:, None, :] + w * (c[sel] - a[sel])[:, None, :]
-        punti.append(griglia.reshape(-1, 3))
-    return np.ascontiguousarray(np.vstack(punti))
+        facce_per_lotto = max(1, _PUNTI_PER_LOTTO_CAMPIONI // len(ij))
+        for i in range(0, len(idx), facce_per_lotto):
+            sel = idx[i : i + facce_per_lotto]
+            griglia = a[sel][:, None, :] + u * (b[sel] - a[sel])[:, None, :] + w * (c[sel] - a[sel])[:, None, :]
+            yield griglia.reshape(-1, 3)
 
 
-# Candidati per punto nella ricerca del piu' vicino: 8 triangoli vicini per
-# centroide bastano su una mesh ragionevole (non aghi ovunque); il lotto
-# sotto tiene il picco di memoria basso indipendentemente da quanti punti.
+# ponytail: k=8 candidati per centroide, non tutte le facce. Il tetto vero
+# non sono gli aghi isolati ma la disparita' di taglia fra triangoli vicini:
+# un triangolo grande col baricentro lontano, circondato da 12 piccoli, puo'
+# restare fuori dagli 8 piu' vicini anche se la sua superficie e' a 0 mm dal
+# punto (riprodotto in review: 0,99 mm invece di 0). La direzione dell'errore
+# e' fail-safe: sovrastima, mai sottostima, quindi puo' far scattare un
+# `WrapOltreTolleranzaError` di troppo ma mai farne mancare uno vero. Se
+# compaiono rifiuti spuri su mesh con taglie di triangolo molto disomogenee,
+# la via d'uscita e' `query_ball_point` sui centroidi (raggio, non k fisso)
+# al posto di questo k.
 _CANDIDATI_PER_PUNTO = 8
 _LOTTO_PUNTI = 20_000
 
@@ -204,6 +226,53 @@ def _distanza_punti_a_superficie(punti: np.ndarray, vertices: np.ndarray, faces:
     return distanze
 
 
+def _somma_esatta_aggiungi(parziali: list[float], x: float) -> None:
+    """Aggiunge `x` a una somma esatta a lotti (Shewchuk/Hettinger msum, ricetta
+    ASPN 393090 — lo stesso algoritmo dietro `math.fsum`).
+
+    La somma in virgola mobile non e' associativa: `(a+b)+c` puo' differire
+    da `a+(b+c)` nell'ultimo bit. `parziali` tiene una scomposizione esatta
+    (non arrotondata) della somma finora; il totale (`sum(parziali)`, un solo
+    arrotondamento alla fine) non dipende dall'ordine o dal raggruppamento
+    in cui i valori arrivano — necessario perche' la media non deve cambiare
+    con la dimensione del lotto.
+    """
+    i = 0
+    for y in parziali:
+        if abs(x) < abs(y):
+            x, y = y, x
+        alto = x + y
+        basso = y - (alto - x)
+        if basso != 0.0:
+            parziali[i] = basso
+            i += 1
+        x = alto
+    parziali[i:] = [x]
+
+
+def _distanza_massima_e_media(vertices: np.ndarray, faces: np.ndarray, passo: float, verso_v: np.ndarray, verso_f: np.ndarray) -> tuple[float, float]:
+    """Massimo e media della distanza dai campioni di (vertices, faces) verso l'altra superficie.
+
+    A lotti (`_lotti_di_campioni`): massimo e somma/conteggio si aggiornano
+    lotto per lotto, cosi' non serve mai avere tutti i campioni in memoria
+    insieme. La somma usa `_somma_esatta_aggiungi` (non un `+=` diretto)
+    perche' la media deve restare identica qualunque sia la dimensione del
+    lotto, e la somma in virgola mobile normale non lo garantisce.
+    """
+    massimo = 0.0
+    parziali: list[float] = []
+    conteggio = 0
+    for lotto in _lotti_di_campioni(vertices, faces, passo):
+        if len(lotto) == 0:
+            continue
+        d = _distanza_punti_a_superficie(lotto, verso_v, verso_f)
+        massimo = max(massimo, float(d.max()))
+        for x in d:
+            _somma_esatta_aggiungi(parziali, float(x))
+        conteggio += len(d)
+    return massimo, (sum(parziali) / conteggio if conteggio else 0.0)
+
+
 def spostamento(
     va: np.ndarray,
     fa: np.ndarray,
@@ -213,14 +282,17 @@ def spostamento(
 ) -> dict[str, float]:
     """Distanza punto-superficie nei due versi, deterministico.
 
-    I campioni sono `_campioni_deterministici`: il solo campionamento dei
-    vertici sottostimerebbe l'errore dove i triangoli sono grandi
+    I campioni sono `_lotti_di_campioni`: il solo campionamento dei vertici
+    sottostimerebbe l'errore dove i triangoli sono grandi
     (`quality.geometric_error`, meshrec/src/meshrec/core/quality.py:519-526),
-    la griglia copre anche l'interno delle facce. La distanza e' verso la
-    superficie **continua** dell'altra mesh (`_distanza_punti_a_superficie`,
-    proiezione esatta sul triangolo), non verso i suoi campioni: misurare
-    punto-contro-punti-campionati sottostima anche su una superficie liscia
-    (misurato: 1,05 mm invece di 0,5 mm sulla sfera pulita, wrap 5 mm).
+    la griglia copre anche l'interno delle facce, a lotti cosi' il picco di
+    memoria dipende dal lotto e non dalla mesh intera (round 2 costruiva
+    tutto in un colpo solo: su una superficie reale, centinaia di milioni di
+    punti). La distanza e' verso la superficie **continua** dell'altra mesh
+    (`_distanza_punti_a_superficie`, proiezione esatta sul triangolo), non
+    verso i suoi campioni: misurare punto-contro-punti-campionati sottostima
+    anche su una superficie liscia (misurato: 1,05 mm invece di 0,5 mm sulla
+    sfera pulita, wrap 5 mm).
 
     Il filtro `get_hausdorff_distance` di PyMeshLab, verificato in sessione,
     non e' deterministico nemmeno con `sampleface=False, samplevert=True` su
@@ -242,15 +314,13 @@ def spostamento(
     """
     if passo_mm is None:
         passo_mm = 0.01 * max(_diagonale(va), _diagonale(vb))
-    campioni_a = _campioni_deterministici(va, fa, passo_mm)
-    campioni_b = _campioni_deterministici(vb, fb, passo_mm)
-    d_a_verso_b = _distanza_punti_a_superficie(campioni_a, vb, fb)
-    d_b_verso_a = _distanza_punti_a_superficie(campioni_b, va, fa)
+    max_a_verso_b, mean_a_verso_b = _distanza_massima_e_media(va, fa, passo_mm, vb, fb)
+    max_b_verso_a, mean_b_verso_a = _distanza_massima_e_media(vb, fb, passo_mm, va, fa)
     return {
-        "max_a_verso_b": float(d_a_verso_b.max()),
-        "max_b_verso_a": float(d_b_verso_a.max()),
-        "max": float(max(d_a_verso_b.max(), d_b_verso_a.max())),
-        "mean": float(max(d_a_verso_b.mean(), d_b_verso_a.mean())),
+        "max_a_verso_b": max_a_verso_b,
+        "max_b_verso_a": max_b_verso_a,
+        "max": max(max_a_verso_b, max_b_verso_a),
+        "mean": max(mean_a_verso_b, mean_b_verso_a),
     }
 
 

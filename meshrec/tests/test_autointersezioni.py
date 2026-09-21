@@ -8,14 +8,14 @@ from meshrec.core import autointersezioni as ai
 from meshrec.core import config, volume
 
 
-def _sfera(polo: tuple[float, float, float] | None = None):
+def _sfera(polo: tuple[float, float, float] | None = None, resolution: int = 20):
     """Sfera di raggio 50 mm; `polo` sposta il vertice piu' alto.
 
     Con polo a (0, 0, -70) il vertice attraversa la calotta opposta: 80 facce
     autointersecanti su 1520, misurato il 21/09/2026. Due cubi compenetrati NON
     servono: MeshFix li riduce a 7 vertici dichiarando successo.
     """
-    sfera = o3d.geometry.TriangleMesh.create_sphere(radius=50.0, resolution=20)
+    sfera = o3d.geometry.TriangleMesh.create_sphere(radius=50.0, resolution=resolution)
     v = np.asarray(sfera.vertices).copy()
     f = np.asarray(sfera.triangles).astype(np.int64)
     if polo is not None:
@@ -231,3 +231,46 @@ def test_wrap_spento_superficie_aperta_con_autointersezioni_da_notwatertight():
     f_aperta = f[1:]  # bordo aperto, oltre al polo passante
     with pytest.raises(volume.NotWatertightError):
         ai.prepara_ingresso(v, f_aperta, config.TetConfig(), step_8_acceso=False)
+
+
+# Fix round 3: i campioni di spostamento a lotti (finding b, round 2). Round 2
+# costruiva tutti i campioni in un colpo solo (`np.vstack`); su una mesh reale
+# (1-4 M facce, spigoli 10-20 mm, passo tol/5) sono centinaia di milioni di
+# punti, OOM.
+
+
+def test_spostamento_con_facce_enormi_e_passo_piccolo_non_esplode():
+    """Esempio del finding: 2 triangoli da 1000 mm di spigolo, passo 0,1 —
+    senza il tetto e senza lotti, miliardi di punti. Qui deve solo finire,
+    in fretta, senza MemoryError."""
+    v = np.array(
+        [[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [1000.0, 1000.0, 0.0], [0.0, 1000.0, 0.0]]
+    )
+    f = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
+    risultato = ai.spostamento(v, f, v, f, passo_mm=0.1)
+    assert risultato["max"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_i_lotti_di_campioni_restano_sotto_il_budget_anche_su_molte_facce():
+    """La mesh reale del finding ha 1-4 M facce uniformi (10-20 mm), non
+    poche facce enormi: e' il totale che esplode, non una singola faccia.
+    Qui una sfera con tante facce piccole e un passo che le costringe a piu'
+    di un lotto: ogni lotto deve restare sotto il budget, il totale no —
+    e' la prova che il picco di memoria dipende dal lotto."""
+    v, f = _sfera(resolution=80)
+    lotti = list(ai._lotti_di_campioni(v, f, 0.3))
+    assert len(lotti) > 1
+    assert sum(len(lotto) for lotto in lotti) > ai._PUNTI_PER_LOTTO_CAMPIONI
+    for lotto in lotti:
+        assert len(lotto) <= ai._PUNTI_PER_LOTTO_CAMPIONI
+
+
+def test_spostamento_e_indipendente_dalla_dimensione_del_lotto(monkeypatch):
+    """Una faccia o un lotto parziale finale non deve cambiare il risultato:
+    stessa mesh, lotto piu' piccolo, stesso dict."""
+    v, f = _sfera((0.0, 0.0, -70.0))
+    wv, wf, _ = ai.avvolgi(v, f, 5.0)
+    con_lotto_grande = ai.spostamento(v, f, wv, wf, passo_mm=1.0)
+    monkeypatch.setattr(ai, "_PUNTI_PER_LOTTO_CAMPIONI", 500)
+    con_lotto_piccolo = ai.spostamento(v, f, wv, wf, passo_mm=1.0)
+    assert con_lotto_grande == con_lotto_piccolo
