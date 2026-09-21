@@ -11,3 +11,8 @@
 # sha256): un checkout Windows con autocrlf gli metterebbe CRLF e l'impronta
 # non tornerebbe piu', su una copia che funziona benissimo.
 meshrec/src/meshrec/ui/vendor/*.js -text
+
+# Le fonti catturate sono verificate byte per byte contro il proprio sidecar
+# (`<slug>.provenance.json`, sha256 della sorgente): quattro sorgenti hanno fine
+# riga CRLF, e la normalizzazione li renderebbe inverificabili su ogni checkout.
+docs/ricerca/fonti/*.md -text
