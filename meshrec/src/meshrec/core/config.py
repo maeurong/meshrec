@@ -319,6 +319,20 @@ class TetConfig(_ModelloBase):
             "IneffectiveVolumeLimitWarning. Vedi docs/fase-1-min-ratio.md"
         ),
     )
+    wrap_tolerance: float | None = Field(
+        default=None,
+        gt=0.0,
+        title="spostamento ammesso dal ripiego alpha wrap [mm]",
+        description=(
+            "Vuoto = spento. Acceso, lo step 9 sostituisce la superficie con un "
+            "alpha wrap di CGAL prima di TetGen: serve quando TetGen si ferma nel "
+            "recupero del bordo (recoversubfaces). La superficie non viene "
+            "riparata ma rifatta: il volume cresce dell'offset e le cavità più "
+            "strette della tolleranza spariscono. Se lo spostamento misurato "
+            "supera questo valore lo step fallisce. Vedi "
+            "docs/ricerca/2026-09-21-autointersezioni-e-degeneri.md §5.1"
+        ),
+    )
     reference_ratio: float = Field(
         default=1.8,
         gt=0.0,
