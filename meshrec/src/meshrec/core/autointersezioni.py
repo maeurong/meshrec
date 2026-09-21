@@ -93,26 +93,50 @@ def avvolgi(
     return wv, wf, {"wrap_alpha_mm": tolleranza, "wrap_offset_mm": offset, "wrap_seconds": secondi}
 
 
+def _campioni_deterministici(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    """Vertici, baricentri delle facce, punti medi degli spigoli: niente Montecarlo.
+
+    `get_hausdorff_distance` con `sampleface=True` campiona l'interno delle
+    facce a caso, e la versione installata di PyMeshLab non espone un seme
+    (verificato con `pymeshlab.print_filter_parameter_list('get_hausdorff_distance')`,
+    21/09/2026: nessun parametro di seme in lista). Stessi ingressi, valori
+    diversi a ogni chiamata — misurato: 29,85/30,11/30,11/30,38/... mm sulla
+    stessa coppia. Questi punti sono fissi, quindi lo e' anche il campione.
+    """
+    v = np.asarray(vertices, dtype=np.float64)
+    f = np.asarray(faces, dtype=np.int64)
+    baricentri = v[f].mean(axis=1)
+    spigoli = np.concatenate([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]])
+    punti_medi = v[spigoli].mean(axis=1)
+    return np.ascontiguousarray(np.vstack([v, baricentri, punti_medi]))
+
+
 def spostamento(
     va: np.ndarray, fa: np.ndarray, vb: np.ndarray, fb: np.ndarray
 ) -> dict[str, float]:
-    """Hausdorff nei due versi fra due superfici, campionando vertici e facce.
+    """Hausdorff nei due versi fra due superfici, su campioni fissi (deterministico).
 
-    I predefiniti di `get_hausdorff_distance` campionano 3 punti e tagliano
-    oltre il 50 % della diagonale: qui sono espliciti. Un campione per faccia.
+    Il campione e' `_campioni_deterministici`: vertici, baricentri e punti
+    medi degli spigoli, misurati con `samplevert=True` soltanto (nessun
+    Montecarlo). Il solo campionamento dei vertici sottostimerebbe l'errore
+    dove i triangoli sono grandi (`quality.geometric_error`,
+    meshrec/src/meshrec/core/quality.py:519-526); qui i baricentri e i punti
+    medi coprono anche l'interno delle facce, senza il dado del Montecarlo.
     `mean` e' il **massimo** delle due medie direzionali: nome ingannevole ma
     voluto, cautelativo.
     """
     import pymeshlab
 
-    mesh_set = _mesh_set(va, fa)
+    mesh_set = _mesh_set(va, fa)  # 0: superficie A
     mesh_set.add_mesh(
         pymeshlab.Mesh(np.asarray(vb, dtype=np.float64), np.asarray(fb, dtype=np.int32))
-    )
+    )  # 1: superficie B
+    mesh_set.add_mesh(pymeshlab.Mesh(_campioni_deterministici(va, fa)))  # 2: campioni di A
+    mesh_set.add_mesh(pymeshlab.Mesh(_campioni_deterministici(vb, fb)))  # 3: campioni di B
     versi = {}
-    for nome, campionata, bersaglio, facce in (
-        ("max_a_verso_b", 0, 1, len(fa)),
-        ("max_b_verso_a", 1, 0, len(fb)),
+    for nome, campionata, bersaglio in (
+        ("max_a_verso_b", 2, 1),
+        ("max_b_verso_a", 3, 0),
     ):
         versi[nome] = dict(
             mesh_set.apply_filter(
@@ -120,8 +144,7 @@ def spostamento(
                 sampledmesh=campionata,
                 targetmesh=bersaglio,
                 samplevert=True,
-                sampleface=True,
-                samplenum=int(facce),
+                sampleface=False,
                 maxdist=pymeshlab.PercentageValue(100.0),
             )
         )

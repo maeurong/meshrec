@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 import open3d as o3d
 import pytest
@@ -59,6 +61,15 @@ def test_il_wrap_rifiuta_superficie_vuota_e_tolleranza_non_positiva():
 def test_due_superfici_identiche_non_si_spostano():
     v, f = _sfera()
     assert ai.spostamento(v, f, v, f)["max"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_spostamento_e_deterministico():
+    """`get_hausdorff_distance` con sampleface=True e' Montecarlo senza seme
+    esposto (verificato con pymeshlab.print_filter_parameter_list, 21/09/2026):
+    stessi ingressi, valori diversi a ogni chiamata. Qui devono coincidere."""
+    v, f = _sfera((0.0, 0.0, -70.0))
+    wv, wf, _ = ai.avvolgi(v, f, 5.0)
+    assert ai.spostamento(v, f, wv, wf) == ai.spostamento(v, f, wv, wf)
 
 
 # Le due righe segnalate dall'architect come scoperte dallo Step 1.
@@ -144,9 +155,15 @@ def test_una_pulizia_che_non_converge_ferma_lo_step(monkeypatch):
 
 
 def test_il_wrap_oltre_tolleranza_ferma_lo_step_col_valore_misurato():
+    """Il messaggio porta il valore misurato, sopra la tolleranza dichiarata.
+    Non un regex sul primo intero: col campionamento deterministico il valore
+    non è più 3x,xx per costruzione, solo > 5.0."""
     v, f = _sfera((0.0, 0.0, -70.0))
-    with pytest.raises(ai.WrapOltreTolleranzaError, match=r"3\d[,.]\d+ mm"):
+    with pytest.raises(ai.WrapOltreTolleranzaError) as caduta:
         ai.prepara_ingresso(v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False)
+    trovato = re.search(r"fino a ([\d,.]+) mm", str(caduta.value))
+    assert trovato is not None
+    assert float(trovato.group(1).replace(",", ".")) > 5.0
 
 
 def test_il_wrap_entro_tolleranza_sostituisce_e_dichiara(monkeypatch):
