@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from meshrec.core import config, io, pipeline, quality, steps, synth
+from meshrec.core import autointersezioni, config, io, pipeline, quality, steps, synth
 
 
 SIZE = (120.0, 60.0, 240.0)
@@ -236,6 +236,78 @@ def test_the_same_configuration_run_twice_gives_the_same_result(tmp_path):
     assert first["09_tetrahedralize"]["nodes"] == second["09_tetrahedralize"]["nodes"]
     assert first["09_tetrahedralize"]["tets"] == second["09_tetrahedralize"]["tets"]
     assert first["11_export"]["volume"] == pytest.approx(second["11_export"]["volume"], rel=1e-9)
+
+
+def test_lo_step_9_dichiara_le_autointersezioni_anche_quando_sono_zero(run_dir):
+    out, metrics = run_dir
+    passo = metrics["09_tetrahedralize"]
+    assert passo["self_intersections_before"] == 0
+    assert passo["wrap_applied"] is False
+    assert "geometric_error" not in passo
+
+
+def _ripresa_dallo_step_9(run_dir, tmp_path, **tet):
+    """Copia della corsa condivisa: `run_dir` e' di modulo, riprendere li'
+    riscriverebbe gli artefatti che gli altri test leggono. `to_step=9`
+    tiene la corsa fuori dalla condizione `stop >= 12` che carica gia' la
+    nuvola (`pipeline.py:668`): senza, il test non passerebbe dal codice nuovo."""
+    out, _ = run_dir
+    copia = tmp_path / "copia"
+    shutil.copytree(out, copia)
+    cfg = config.load_config(copia / "config.yaml")
+    cfg.run.out_dir = copia
+    cfg.run.from_step = 9
+    cfg.run.to_step = 9
+    cfg.tet.wrap_tolerance = tet.get("wrap_tolerance")
+    return copia, cfg
+
+
+def test_il_wrap_acceso_rimisura_l_errore_contro_la_nuvola(run_dir, tmp_path):
+    _, cfg = _ripresa_dallo_step_9(run_dir, tmp_path, wrap_tolerance=20.0)
+    passo = pipeline.run(cfg)["09_tetrahedralize"]
+    assert passo["wrap_applied"] is True
+    assert passo["wrap_hausdorff_max_mm"] <= 20.0
+    assert "hausdorff" in passo["geometric_error"]
+
+
+def test_senza_la_nuvola_segmentata_la_rimisura_nomina_lo_step_2(run_dir, tmp_path):
+    copia, cfg = _ripresa_dallo_step_9(run_dir, tmp_path, wrap_tolerance=20.0)
+    (copia / "02_segmented.ply").unlink()
+    with pytest.raises(ValueError, match="lo step 2 non ha ancora scritto"):
+        pipeline.run(cfg)
+
+
+def test_senza_rimisura_necessaria_non_serve_la_nuvola_segmentata(run_dir, tmp_path):
+    """Riga del contratto ingressi: ripresa 9->9 senza 02_segmented.ply e senza
+    rimisura necessaria (superficie pulita, wrap spento) -> la corsa riesce.
+    Se il codice leggesse comunque la nuvola, il file mancante alzerebbe
+    l'errore di `_ingresso_di_ripresa` che nomina lo step 2."""
+    copia, cfg = _ripresa_dallo_step_9(run_dir, tmp_path)
+    (copia / "02_segmented.ply").unlink()
+    passo = pipeline.run(cfg)["09_tetrahedralize"]
+    assert passo["self_intersections_before"] == 0
+    assert "geometric_error" not in passo
+
+
+def test_l_errore_dentro_lo_step_9_non_scrive_un_nuovo_09_volume_vtu(run_dir, tmp_path, monkeypatch):
+    """Riga del contratto ingressi: `WrapOltreTolleranzaError` /
+    `AutointersezioniResidueError` dentro la corsa -> nessun `09_volume.vtu`
+    nuovo. `prepara_ingresso` e' il primo passo dello step 9, prima di
+    `write_vtu`: simularne il fallimento basta a provare che l'artefatto
+    vecchio resta intatto, senza dover inventare una geometria che fallisca
+    per davvero."""
+    copia, cfg = _ripresa_dallo_step_9(run_dir, tmp_path)
+    volume_path = copia / pipeline.ARTIFACTS[9]
+    prima = volume_path.read_bytes()
+
+    def esplode(*_args, **_kwargs):
+        raise autointersezioni.WrapOltreTolleranzaError("wrap simulato oltre tolleranza")
+
+    monkeypatch.setattr(pipeline.autointersezioni, "prepara_ingresso", esplode)
+    with pytest.raises(autointersezioni.WrapOltreTolleranzaError):
+        pipeline.run(cfg)
+
+    assert volume_path.read_bytes() == prima
 
 
 def test_resuming_from_tetrahedralize_works_when_simplify_is_disabled(run_dir):

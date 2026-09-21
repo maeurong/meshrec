@@ -16,6 +16,7 @@ import numpy as np
 from meshrec.core import (
     abaqus,
     attribuzione,
+    autointersezioni,
     io,
     quality,
     repair,
@@ -655,6 +656,7 @@ def run(cfg: PipelineConfig) -> dict[str, object]:
                 or io.mean_spacing(points, cfg.input.spacing_sample, cfg.input.seed)
             )
 
+        source_cloud: np.ndarray | None = None
         if start <= 2:
             in_corso = 2
             avvio = time.monotonic()
@@ -778,9 +780,22 @@ def run(cfg: PipelineConfig) -> dict[str, object]:
         if start <= 9:
             in_corso = 9
             avvio = time.monotonic()
+            vertices, faces, preparazione, cambiata = autointersezioni.prepara_ingresso(
+                vertices, faces, cfg.tet, step_8_acceso=cfg.simplify.enabled
+            )
             nodes, tets, step_metrics = volume.tetrahedralize_with_metrics(
                 vertices, faces, cfg.tet
             )
+            step_metrics = {**preparazione, **step_metrics}
+            # Lo step 7 misura l'errore prima dello step 8 e di questa
+            # preparazione: se la superficie e' cambiata dopo, quel numero non
+            # descrive piu' la superficie che TetGen ha riempito.
+            if cambiata or cfg.simplify.enabled:
+                if source_cloud is None:
+                    source_cloud, _ = _ingresso_di_ripresa(9, 2, out, io.read_cloud)
+                step_metrics["geometric_error"] = quality.geometric_error(
+                    vertices, faces, source_cloud
+                )
             metrics["09_tetrahedralize"] = step_metrics
             # Il tipo va dichiarato: `write_vtu` non lo indovina dal numero di
             # colonne, e il suo predefinito e' il lineare. Senza, un maglio
