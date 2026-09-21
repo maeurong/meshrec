@@ -247,7 +247,9 @@ def _distanza_massima_e_media(
     somme: list[float] = []
     conteggio = 0
     # ponytail: tutte le distanze tenute in float32 per il percentile, 4 byte
-    # a campione: 40 M campioni = 160 MB. Se la memoria diventa il problema,
+    # a campione: 40 M campioni = 160 MB, ma il picco e' circa 3 volte tanto
+    # (concatenazione dei lotti, dei due versi, copia di `np.percentile`).
+    # Se la memoria diventa il problema,
     # un istogramma a passo fisso aggiornato lotto per lotto le sostituisce.
     distanze: list[np.ndarray] = []
     for lotto in _lotti_di_campioni(vertices, faces, passo):
