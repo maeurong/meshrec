@@ -784,11 +784,13 @@ def run(cfg: PipelineConfig) -> dict[str, object]:
         if start <= 9:
             in_corso = 9
             avvio = time.monotonic()
-            vertices, faces, preparazione, cambiata = autointersezioni.prepara_ingresso(
+            # Nomi propri per la superficie preparata: `vertices` resta 06/08,
+            # la stessa che la ripresa dallo step 11 ricarica.
+            v_tet, f_tet, preparazione, cambiata = autointersezioni.prepara_ingresso(
                 vertices, faces, cfg.tet, step_8_acceso=cfg.simplify.enabled
             )
             nodes, tets, step_metrics = volume.tetrahedralize_with_metrics(
-                vertices, faces, cfg.tet
+                v_tet, f_tet, cfg.tet
             )
             step_metrics = {**preparazione, **step_metrics}
             # Lo step 7 misura l'errore prima dello step 8 e di questa
@@ -798,7 +800,7 @@ def run(cfg: PipelineConfig) -> dict[str, object]:
                 if source_cloud is None:
                     source_cloud, _ = _ingresso_di_ripresa(9, 2, out, io.read_cloud)
                 step_metrics["geometric_error"] = quality.geometric_error(
-                    vertices, faces, source_cloud
+                    v_tet, f_tet, source_cloud
                 )
             metrics["09_tetrahedralize"] = step_metrics
             # Il tipo va dichiarato: `write_vtu` non lo indovina dal numero di
@@ -847,9 +849,11 @@ def run(cfg: PipelineConfig) -> dict[str, object]:
                 nome: np.flatnonzero(etichette == posizione)
                 for posizione, nome in enumerate(prismi)
             }
-        # `vertices` e' la superficie da cui la mesh di volume e' stata
-        # generata: e' quella, e non i nodi del volume, a definire il sistema
-        # di riferimento del modello (vedi abaqus.align_to_axes).
+        # `vertices` e' la superficie 06/08, non i nodi del volume, a definire
+        # il sistema di riferimento del modello (vedi abaqus.align_to_axes).
+        # Non quella preparata dallo step 9 (pulita o avvolta): la ripresa dal
+        # 10/11 ritrova solo 06/08, e la stessa configurazione deve dare lo
+        # stesso deck in corsa unica e in ripresa.
         metrics["11_export"] = abaqus.export_model(
             out / DECK_FILENAME,
             out / WALL_VTU_FILENAME,

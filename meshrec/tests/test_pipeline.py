@@ -263,11 +263,40 @@ def _ripresa_dallo_step_9(run_dir, tmp_path, **tet):
 
 
 def test_il_wrap_acceso_rimisura_l_errore_contro_la_nuvola(run_dir, tmp_path):
-    _, cfg = _ripresa_dallo_step_9(run_dir, tmp_path, wrap_tolerance=20.0)
+    copia, cfg = _ripresa_dallo_step_9(run_dir, tmp_path, wrap_tolerance=20.0)
+    (copia / pipeline.ARTIFACTS[9]).unlink()
     passo = pipeline.run(cfg)["09_tetrahedralize"]
     assert passo["wrap_applied"] is True
     assert passo["wrap_hausdorff_max_mm"] <= 20.0
     assert "hausdorff" in passo["geometric_error"]
+    assert (copia / pipeline.ARTIFACTS[9]).exists()
+
+
+def test_col_wrap_lo_step_11_usa_la_stessa_superficie_in_corsa_unica_e_in_ripresa(
+    run_dir, tmp_path, monkeypatch
+):
+    """La ripresa dal 10/11 ricarica 06/08 (`_ingresso_di_ripresa`): se la
+    corsa unica passasse allo step 11 la superficie avvolta, la stessa
+    configurazione darebbe due deck diversi. Il riferimento e' 06/08 in
+    entrambi i casi."""
+    riferimenti = []
+    vero = pipeline.abaqus.export_model
+
+    def cattura(*args, reference, **kwargs):
+        riferimenti.append(np.array(reference, copy=True))
+        return vero(*args, reference=reference, **kwargs)
+
+    monkeypatch.setattr(pipeline.abaqus, "export_model", cattura)
+    copia, cfg = _ripresa_dallo_step_9(run_dir, tmp_path, wrap_tolerance=20.0)
+    cfg.run.to_step = 11
+    pipeline.run(cfg)
+    cfg.run.from_step = 11
+    pipeline.run(cfg)
+
+    superficie, _ = pipeline._read_mesh(copia / pipeline.ARTIFACTS[6])
+    assert len(riferimenti) == 2
+    assert np.array_equal(riferimenti[0], riferimenti[1])
+    assert np.array_equal(riferimenti[0], superficie)
 
 
 def test_senza_la_nuvola_segmentata_la_rimisura_nomina_lo_step_2(run_dir, tmp_path):
@@ -308,8 +337,7 @@ def test_lo_step_8_acceso_forza_la_rimisura_anche_a_superficie_pulita(run_dir, t
 
 
 def test_l_errore_dentro_lo_step_9_non_scrive_un_nuovo_09_volume_vtu(run_dir, tmp_path, monkeypatch):
-    """Riga del contratto ingressi: `WrapOltreTolleranzaError` /
-    `AutointersezioniResidueError` dentro la corsa -> nessun `09_volume.vtu`
+    """Riga del contratto ingressi: `AutointersezioniResidueError` dentro la corsa -> nessun `09_volume.vtu`
     nuovo. `prepara_ingresso` e' il primo passo dello step 9, prima di
     `write_vtu`: simularne il fallimento basta a provare che l'artefatto
     vecchio resta intatto, senza dover inventare una geometria che fallisca
@@ -319,10 +347,10 @@ def test_l_errore_dentro_lo_step_9_non_scrive_un_nuovo_09_volume_vtu(run_dir, tm
     prima = volume_path.read_bytes()
 
     def esplode(*_args, **_kwargs):
-        raise autointersezioni.WrapOltreTolleranzaError("wrap simulato oltre tolleranza")
+        raise autointersezioni.AutointersezioniResidueError("residue simulate")
 
     monkeypatch.setattr(pipeline.autointersezioni, "prepara_ingresso", esplode)
-    with pytest.raises(autointersezioni.WrapOltreTolleranzaError):
+    with pytest.raises(autointersezioni.AutointersezioniResidueError):
         pipeline.run(cfg)
 
     assert volume_path.read_bytes() == prima
