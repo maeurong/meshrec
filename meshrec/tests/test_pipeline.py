@@ -289,6 +289,24 @@ def test_senza_rimisura_necessaria_non_serve_la_nuvola_segmentata(run_dir, tmp_p
     assert "geometric_error" not in passo
 
 
+def test_lo_step_8_acceso_forza_la_rimisura_anche_a_superficie_pulita(run_dir, tmp_path):
+    """Riga del contratto ingressi: ripresa 9->9 con lo step 8 acceso ->
+    `geometric_error` presente, anche se la superficie e' pulita e il wrap e'
+    spento (cioe' `cambiata is False`): e' `cfg.simplify.enabled`, non
+    `cambiata`, a chiedere la rimisura.
+
+    `run_dir` ha lo step 8 spento, quindi non scrive `08_simplified.ply`: con
+    `simplify.enabled=True` la ripresa dal 9 lo pretende (`pipeline.py:744`,
+    `resume_from = 8 if cfg.simplify.enabled else 6`), cosi' la copia lo
+    fabbrica da `06_repaired.ply`, che e' la stessa superficie pulita."""
+    copia, cfg = _ripresa_dallo_step_9(run_dir, tmp_path)
+    shutil.copy(copia / pipeline.ARTIFACTS[6], copia / pipeline.ARTIFACTS[8])
+    cfg.simplify = cfg.simplify.model_copy(update={"enabled": True})
+
+    passo = pipeline.run(cfg)["09_tetrahedralize"]
+    assert "geometric_error" in passo
+
+
 def test_l_errore_dentro_lo_step_9_non_scrive_un_nuovo_09_volume_vtu(run_dir, tmp_path, monkeypatch):
     """Riga del contratto ingressi: `WrapOltreTolleranzaError` /
     `AutointersezioniResidueError` dentro la corsa -> nessun `09_volume.vtu`

@@ -668,15 +668,19 @@ def run(cfg: PipelineConfig) -> dict[str, object]:
             if stop <= 2:
                 raise _FermataRichiesta
         elif start <= 7 or stop >= 12:
-            # La nuvola segmentata (uscita dello step 2) ha DUE consumatori e
-            # nessun altro: l'errore geometrico dello step 7 e il prior dello
-            # step 12. La condizione li nomina entrambi invece di caricarla
-            # sempre, e non e' una micro-ottimizzazione: caricarla quando non
-            # gira nessuno dei due faceva FALLIRE una corsa che non ne aveva
-            # bisogno. «Esegui solo lo step 9» in una cartella senza
-            # 02_segmented.ply si fermava per un artefatto che quello step non
-            # tocca -- ed e' proprio il caso che from_step == to_step esiste per
-            # servire (config.py, RunConfig).
+            # La nuvola segmentata (uscita dello step 2) ha qui DUE consumatori
+            # nominati: l'errore geometrico dello step 7 e il prior dello step
+            # 12. Lo step 9 e' un terzo consumatore, ma condizionale (solo se
+            # la superficie e' cambiata dopo lo step 7, o se lo step 8 e'
+            # acceso) e serve gia' da questa lettura anticipata quando
+            # `stop >= 12`: se non serve, la carica lui stesso a valle, pigra.
+            # La condizione qui nomina 7 e 12 invece di caricarla sempre, e non
+            # e' una micro-ottimizzazione: caricarla quando non serve a nessuno
+            # dei tre faceva FALLIRE una corsa che non ne aveva bisogno.
+            # «Esegui solo lo step 9» in una cartella senza 02_segmented.ply si
+            # fermava per un artefatto che quello step non tocca -- ed e'
+            # proprio il caso che from_step == to_step esiste per servire
+            # (config.py, RunConfig).
             #
             # `chiede` e' lo step che la consuma, non quello da cui la corsa
             # riparte. Nominare `start` produceva un consiglio che distrugge il
