@@ -10,6 +10,24 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-21-autointersezioni-e-wrap-design.md`
 
+## Annotazione architect — sequencing e dispatch (21/09/2026, HEAD `74ae9bb`)
+
+| Task | Subagente | Skill-gate | Dipende da | File toccati |
+|---|---|---|---|---|
+| 0 | thread principale | — | — | nessuno: suite onesta di riferimento (`pytest -m "" -q`), passati/saltati annotati. Il Task 5 Step 5 la pretende **prima** del Task 1 |
+| 1 | `backend-engineer` | true | 0 | `core/config.py`, `core/sweep.py`, `tests/test_config.py` |
+| 2 | `backend-engineer` | true | 0 | `core/autointersezioni.py` (nuovo), `tests/test_autointersezioni.py` (nuovo) |
+| 4 | `backend-engineer` | false | 0 | `core/volume.py`, `tests/test_volume.py` |
+| 3 | `backend-engineer` | true | 1, 2, 4 | `core/autointersezioni.py`, `tests/test_autointersezioni.py`, `core/volume.py` (controlli vuota/aperta estratti, vedi annotazione del Task 3) |
+| 5 | `backend-engineer` | true | 3 (4 per la suite onesta dello Step 5) | `core/pipeline.py`, `tests/test_pipeline.py` |
+| 6 | thread principale con Mario (HITL) | false | 5 | `CHANGELOG.md` |
+
+- **Gruppo parallelo A: Task 1, 2, 4.** File disgiunti. Paralleli solo se ognuno lavora in un worktree suo **oppure** i commit si serializzano: tre implementatori che fanno `git add`/`commit` nello stesso checkout si contendono l'indice. Se il controller non isola, falli in sequenza 1 → 2 → 4: costano poco.
+- **Poi sequenziali: 3 → 5 → 6.** Il 3 riapre i due file del 2, legge il campo del 1 e tocca `volume.py` dopo il 4; il 5 importa `prepara_ingresso`; il 6 misura il codice finito.
+- **Round di review pre-commit dopo il Task 5**, in parallelo: `code-reviewer`, `security-reviewer`, `test-writer`, `craft-reviewer` (messaggi d'errore e `description` del campo sono testo che l'utente legge), `spec-reviewer` (la spec esiste). Niente `rust-reviewer` (nessun `.rs`), niente `norme-reviewer` (nessun valore NTC).
+- Ogni brief nomina `skill-gate`, `caveman`, `ponytail`, porta la riga `Riferimento` di sotto e la sezione `## Ingressi degeneri` del task, copiata **intera** (righe aggiunte dall'architect comprese).
+- Premesse corrette in questa annotazione, citate dove servono: `pipeline.py:667` → `:668`; `volume.py:101-108` → `:99-106`; cubo `(100, 40, 200)` → `(120.0, 60.0, 240.0)`; «`TetConfig` rifiuta il campo sconosciuto» → falso; `source_cloud` mai inizializzata sopra; spec `:111-112` («i controlli precedono il wrap») falsa con l'ordine del piano.
+
 ## Global Constraints
 
 - Python ≥3.12 e <3.13; nessuna dipendenza nuova (pymeshlab e pymeshfix già in `meshrec/pyproject.toml:13-14`).
@@ -26,7 +44,7 @@
 - Create: `meshrec/tests/test_autointersezioni.py`
 - Modify: `meshrec/src/meshrec/core/config.py:275-340` — campo `wrap_tolerance` in `TetConfig`.
 - Modify: `meshrec/src/meshrec/core/sweep.py:91-113` — campi nulli fuori impronta.
-- Modify: `meshrec/src/meshrec/core/volume.py:101-108` — diagnosi di `recoversubface`.
+- Modify: `meshrec/src/meshrec/core/volume.py:99-106` — diagnosi di `recoversubface`; `:157-169` — controlli vuota/aperta estratti per `prepara_ingresso` (annotazione del Task 3).
 - Modify: `meshrec/src/meshrec/core/pipeline.py:652-690, 777-783` — chiamata e rimisura.
 - Modify: `meshrec/tests/test_config.py`, `meshrec/tests/test_volume.py`, `meshrec/tests/test_pipeline.py`
 - Modify: `CHANGELOG.md` — voce in `[Unreleased]`.
@@ -63,6 +81,16 @@ Perché: aggiungere un campo sposta `sweep.fingerprint` di tutte le 22 righe dei
 - `wrap_tolerance=-1` → `ValidationError`.
 - `wrap_tolerance` assente nel YAML → `None`, e `sweep.fingerprint` identica a prima del campo.
 - `wrap_tolerance=5.0` → `sweep.fingerprint` diversa da quella con `None`.
+- `wrap_tolerance=float("nan")` o `float("inf")` → `ValidationError` (lo garantisce `allow_inf_nan=False` di `_ModelloBase`, `config.py:118`; basta aggiungerli alla tupla del test).
+- `tet: {wrap_tolerance: null}` esplicito nel YAML → stessa impronta del campo assente.
+- mutazione: togliere il ciclo su `CAMPI_NULLI_FUORI_IMPRONTA` da `fingerprint` → la guardia dell'aggregato (`test_config.py:221`) va **rossa**. Provalo una volta prima del commit e rimetti il ciclo: una guardia mai vista rossa non prova nulla (memoria «controlli che non controllano»).
+
+**Annotazione architect:**
+- Subagente: `backend-engineer`. Skill-gate: **true** (l'impronta tocca 22 righe di registro; errore silenzioso).
+- Sequencing: gruppo parallelo A (con 2 e 4), dopo il Task 0.
+- Riferimento: `docs/ricerca/2026-09-21-autointersezioni-e-degeneri.md:566` — §9 B: il wrap è un ripiego dichiarato, α/offset in millimetri e non in frazione di diagonale.
+- Premessa corretta: `TetConfig` **non** rifiuta i campi sconosciuti. `_ModelloBase` porta solo `allow_inf_nan=False` (`config.py:118`), nessun `extra="forbid"` (`config.py:788` lo nomina come ipotesi futura). Il rosso dello Step 2 è quindi `AttributeError` su `.wrap_tolerance` nel primo test e impronte uguali nel secondo (pydantic ignora il campo), non un rifiuto.
+- `TetConfig` non ha `validate_assignment` (ce l'ha solo `RunConfig`, `config.py:380`): un'assegnazione `cfg.tet.wrap_tolerance = 0` passa senza errore. Non è un difetto da correggere qui; il pannello passa dalla validazione del modello intero.
 
 - [ ] **Step 1: test che falliscono** — in `tests/test_config.py`:
 
@@ -87,7 +115,7 @@ Che il campo spento **non** sposti l'impronta lo prova gia' la guardia sull'aggr
 - [ ] **Step 2: lancia e verifica il rosso**
 
 Run: `uv run --directory /Users/mario/GitHub/Tesi/meshrec pytest tests/test_config.py -k wrap_tolerance -q`
-Expected: FAIL: `TetConfig` rifiuta il campo sconosciuto o non lo ha.
+Expected: FAIL: `AttributeError: 'TetConfig' object has no attribute 'wrap_tolerance'` nel primo test; `assert fingerprint(acceso) != fingerprint(base)` fallisce nel secondo, perché pydantic ignora il campo sconosciuto (nessun `extra="forbid"`, `config.py:118`).
 
 - [ ] **Step 3: campo** — in `TetConfig`, dopo `nobisect`:
 
@@ -161,6 +189,14 @@ git -C /Users/mario/GitHub/Tesi commit -m "feat(config): tet.wrap_tolerance, fuo
 - wrap che esce vuoto → `ValueError` «l'alpha wrap non ha prodotto facce», niente TetGen.
 - `tolleranza` ≤ 0 passata direttamente → `ValueError` (la config la blocca già, qui difesa per chi chiama la funzione a mano).
 - due superfici identiche → `spostamento` rende `max` 0 (entro 1e-9).
+- `faces` con indici `int64` in ingresso (come le rende `_sfera` e la pipeline) → conteggio identico a quello con `int32`: la conversione in `_mesh_set` non tronca né riordina.
+
+**Annotazione architect:**
+- Subagente: `backend-engineer`. Skill-gate: **true** (modulo nuovo, tre librerie C++ dietro binding, parametri che la doc `latest` sbaglia).
+- Sequencing: gruppo parallelo A (con 1 e 4), dopo il Task 0.
+- Riferimento: `docs/ricerca/2026-09-21-autointersezioni-e-degeneri.md:154` — §3.1: nomi e parametri dei filtri PyMeshLab **della wheel installata** (`alpha`/`offset` come `PercentageValue`), non della doc `latest`. Anche `:182` (§3.2, `clean -> bool`) e `:364` (§5.1, garanzie e limiti del wrap).
+- Buco fra righe e test: due righe della lista sopra non hanno test nel codice dello Step 1 — «superficie pulita → `pulisci` rende stesso numero di facce e `True`» e «wrap che esce vuoto → `ValueError`». Aggiungili (il secondo con `monkeypatch` su `ai._mesh_set` o sul filtro, non con una geometria cercata a mano). L'atteso dello Step 4 sale da 7 a 9 passati.
+- `spostamento["mean"]` è il **massimo** delle due medie direzionali: nome ingannevole ma voluto (cautelativo). Dillo nel docstring, non rinominare.
 
 - [ ] **Step 1: test che falliscono** — `tests/test_autointersezioni.py`:
 
@@ -367,7 +403,7 @@ def spostamento(
 - [ ] **Step 4: verde**
 
 Run: `uv run --directory /Users/mario/GitHub/Tesi/meshrec pytest tests/test_autointersezioni.py -q`
-Expected: 7 passed. Se il conteggio del polo passante non è 80, **non** cambiare l'atteso a occhio: rimisuralo e scrivi nel docstring di `_sfera` il valore nuovo con la data.
+Expected: 9 passed (7 del codice sopra + 2 dell'annotazione architect). Se il conteggio del polo passante non è 80, **non** cambiare l'atteso a occhio: rimisuralo e scrivi nel docstring di `_sfera` il valore nuovo con la data.
 
 - [ ] **Step 5: commit**
 
@@ -400,6 +436,16 @@ Metriche prodotte (chiavi esatte): `self_intersections_before`, `self_intersecti
 - residue > 0 con `step_8_acceso=True` → il messaggio nomina lo step 8.
 - polo passante, wrap tol 5 → `WrapOltreTolleranzaError` con il valore misurato (≈30 mm) nel messaggio.
 - sfera pulita, wrap tol 5 → `wrap_applied=True`, `wrap_hausdorff_max_mm` ≈ 0,5, MeshFix non chiamato (`meshfix_clean_converged=None`), `cambiata=True`.
+- superficie **aperta** (sfera con una faccia tolta), wrap tol 5 → `volume.NotWatertightError` con gli spigoli di bordo nel messaggio, **prima** del wrap; il wrap non la chiude in silenzio. La spec lo pretende (`specs/…-design.md:111-112`: «restano i controlli di `volume.tetrahedralize`, che precedono il wrap»), ma nel piano quei controlli (`volume.py:157-169`) girano **dopo** `prepara_ingresso`. Riusa `volume.is_watertight` / `volume.boundary_edges` e lo stesso testo: nessun controllo nuovo.
+- superficie senza facce, wrap acceso → `volume.NotWatertightError` «superficie senza facce» come oggi (`volume.py:157-162`), non il `ValueError` di `avvolgi`.
+- wrap entro tolleranza con autointersezioni residue (monkeypatch di `conta_autointersezioni` sul wrap) → registrate in `self_intersections_after`, **non** fermano lo step (spec `:114-115`).
+- wrap spento, superficie aperta con autointersezioni → finisce in `NotWatertightError`, non in `AutointersezioniResidueError`: il difetto che si dichiara è quello che TetGen incontrerebbe per primo.
+
+**Annotazione architect:**
+- Subagente: `backend-engineer`. Skill-gate: **true** (orchestratore con tre esiti d'errore e l'ordine dei controlli da rispettare).
+- Sequencing: sequenziale, dopo 1, 2 e 4 (stessi file del 2, legge il campo del 1, tocca `volume.py` come il 4).
+- Riferimento: `docs/ricerca/2026-09-21-autointersezioni-e-degeneri.md:552` — §9 A: verificare dopo lo step 8 e leggere il ritorno di `clean()`; necessario, non sufficiente. Il ramo del wrap segue `:566` (§9 B: ripiego dichiarato, spostamento nel registro).
+- Premessa della spec corretta: `specs/2026-09-21-autointersezioni-e-wrap-design.md:111-112` dice che i controlli di superficie vuota/aperta «precedono il wrap». Con l'ordine del piano (Task 5: `prepara_ingresso` poi `tetrahedralize_with_metrics`) è falso: le righe sopra lo rendono vero. Implementazione minima: in testa a `prepara_ingresso`, sempre (wrap acceso o spento), gli stessi due controlli di `volume.py:157-169` — ponytail: estrarli in una funzione di `volume.py` chiamata da `tetrahedralize` e da `prepara_ingresso`, non copiarli. Il Task 3 tocca quindi anche `core/volume.py`: resta sequenziale dopo il Task 4, nessun conflitto.
 
 - [ ] **Step 1: test che falliscono** — aggiungi a `tests/test_autointersezioni.py`:
 
@@ -541,7 +587,7 @@ def prepara_ingresso(
 - [ ] **Step 4: verde**
 
 Run: `uv run --directory /Users/mario/GitHub/Tesi/meshrec pytest tests/test_autointersezioni.py -q`
-Expected: 12 passed.
+Expected: 18 passed (9 del Task 2, 5 sopra, 4 per le righe aggiunte dall'architect agli ingressi degeneri).
 
 - [ ] **Step 5: commit**
 
@@ -555,14 +601,21 @@ git -C /Users/mario/GitHub/Tesi commit -m "feat(autointersezioni): prepara_ingre
 ### Task 4: diagnosi di `recoversubface`
 
 **Files:**
-- Modify: `meshrec/src/meshrec/core/volume.py:101-108`
+- Modify: `meshrec/src/meshrec/core/volume.py:99-106` (il piano diceva `:101-108`; il ramo `recoversubface` è `if` a `:99`, `return` a `:100-106`)
 - Test: `meshrec/tests/test_volume.py:170-193`
 
 **Interfaces:** nessuna nuova; cambia il testo che `RefinementFailedError` porta.
 
 ## Ingressi degeneri
 - messaggio con `recoversubface` → nomina `tet.wrap_tolerance` e «sostituita»; continua a non dire «Alza tet.min_ratio» né «nobisect».
-- messaggio senza `recoversubface` → testo invariato (test esistenti da 106 a 234 restano verdi).
+- messaggio senza `recoversubface` → testo invariato: tutti i test di `tests/test_volume.py` restano verdi senza toccarne le asserzioni.
+- messaggio con `split_subface` e `nobisect=False` → continua a proporre `tet.nobisect` e **non** `tet.wrap_tolerance` (il ramo `:107-116` non si tocca).
+
+**Annotazione architect:**
+- Subagente: `backend-engineer`. Skill-gate: **false** — testo di un `return` e due asserzioni, già scritti per intero nel piano; nessuna decisione.
+- Sequencing: gruppo parallelo A (con 1 e 2), dopo il Task 0.
+- Riferimento: `docs/ricerca/2026-09-21-autointersezioni-e-degeneri.md:124` — §2.2: togliere le autointersezioni non basta, la 06 fallisce in `recoversubfaces` senza averne.
+- Premessa corretta: `volume.py:101-108` → `:99-106` (letto a HEAD `74ae9bb`). Stessa correzione vale per la spec `:101`.
 
 - [ ] **Step 1: estendi il test esistente** — in fondo a `test_il_recupero_del_bordo_non_e_un_problema_di_qualita`:
 
@@ -618,13 +671,23 @@ git -C /Users/mario/GitHub/Tesi commit -m "fix(volume): recoversubface propone t
 - Consumes: `autointersezioni.prepara_ingresso` (Task 3); `quality.geometric_error(vertices, faces, cloud)` (`quality.py:508`); `_ingresso_di_ripresa(chiede, da, out, leggi)` (`pipeline.py:138`).
 - Produces: metriche dello step 9 = quelle di `prepara_ingresso` unite a quelle di `tetrahedralize_with_metrics`, più `geometric_error` quando la superficie è cambiata dopo lo step 7.
 
-Oggi la nuvola sorgente si carica in ripresa solo se `start <= 7 or stop >= 12` (`pipeline.py:667`), e `source_cloud` non è definita altrimenti. La rimisura la chiede solo quando serve, così una ripresa dallo step 9 senza cambi non paga la lettura.
+Oggi la nuvola sorgente si carica in ripresa solo se `start <= 7 or stop >= 12` (`pipeline.py:668`, `elif` dell'`if start <= 2` di `:658`; la lettura è `:684-686`), e `source_cloud` non è definita altrimenti: le sole assegnazioni sono `:664` e `:684`. La rimisura la chiede solo quando serve, così una ripresa dallo step 9 senza cambi non paga la lettura.
 
 ## Ingressi degeneri
 - corsa del cubo di prova (superficie pulita, step 8 spento) → `09_tetrahedralize` porta `self_intersections_before == 0`, `wrap_applied is False`, **nessuna** chiave `geometric_error`; nodi e tetraedri identici a prima (test di determinismo esistente verde).
 - ripresa `from_step=9` con step 8 acceso → `geometric_error` presente, la nuvola caricata da `02_segmented.ply`.
 - ripresa `from_step=9` con `02_segmented.ply` assente e rimisura necessaria → l'errore di `_ingresso_di_ripresa` che nomina lo step 2, non un `NameError`.
 - `wrap_tolerance` acceso sul cubo → `wrap_applied is True`, `geometric_error` presente, deck scritto.
+- ripresa `from_step=9, to_step=9`, step 8 spento, wrap spento, superficie pulita, `02_segmented.ply` **assente** → la corsa riesce: nessuna rimisura, quindi nessuna lettura della nuvola. È la proprietà che il commento di `pipeline.py:669-677` difende («Esegui solo lo step 9» in una cartella senza `02_segmented.ply`); la lettura pigra la conserva solo se il test la inchioda.
+- ripresa con `start >= 10` → lo step 9 non gira, `prepara_ingresso` non è chiamata, il ramo `else` di `pipeline.py:794` invariato (test di ripresa esistenti verdi).
+- `WrapOltreTolleranzaError` / `AutointersezioniResidueError` dentro la corsa → lo step 9 fallisce con quel messaggio e **nessun** `09_volume.vtu` nuovo viene scritto.
+
+**Annotazione architect:**
+- Subagente: `backend-engineer`. Skill-gate: **true** (ripresa, caricamento pigro della nuvola, determinismo).
+- Sequencing: sequenziale, dopo il Task 3; lo Step 5 (suite onesta) anche dopo il Task 4.
+- Riferimento: `docs/ricerca/2026-09-21-autointersezioni-e-degeneri.md:517` — §7 rischio strutturale: un rimedio a valle dello step 7 deve rimisurare l'errore geometrico contro la nuvola.
+- Premesse corrette: condizione di caricamento a `pipeline.py:668`, non `:667` (che è `raise _FermataRichiesta`); il punto (b) dello Step 3 **non** è condizionale, `source_cloud` non è inizializzata prima di `:658` — aggiungila; `shutil` è già importato (`test_pipeline.py:4`); il cubo è `SIZE = (120.0, 60.0, 240.0)` (`test_pipeline.py:14`), non `(100, 40, 200)`; `run_dir` usa `TetConfig(min_ratio=1.2)` e `to_step=12` (`test_pipeline.py:107-113`), e scrive `config.yaml` che `config.load_config` rilegge come fa il test di `:379`.
+- Rischio: le chiavi nuove di `09_tetrahedralize` non hanno etichetta in `ui/etichette.js:140-150`. La spec (`:106`) esclude codice UI: verifica cosa il pannello fa di una chiave senza etichetta (e `geometric_error` è un dizionario annidato) prima di chiudere, e se si vede male dillo nella PR invece di aggiungere UI fuori spec.
 
 - [ ] **Step 1: test che falliscono** — in `tests/test_pipeline.py`, accanto ai test di ripresa (`:240`):
 
@@ -641,7 +704,7 @@ def _ripresa_dallo_step_9(run_dir, tmp_path, **tet):
     """Copia della corsa condivisa: `run_dir` e' di modulo, riprendere li'
     riscriverebbe gli artefatti che gli altri test leggono. `to_step=9`
     tiene la corsa fuori dalla condizione `stop >= 12` che carica gia' la
-    nuvola (`pipeline.py:667`): senza, il test non passerebbe dal codice nuovo."""
+    nuvola (`pipeline.py:668`): senza, il test non passerebbe dal codice nuovo."""
     out, _ = run_dir
     copia = tmp_path / "copia"
     shutil.copytree(out, copia)
@@ -668,7 +731,7 @@ def test_senza_la_nuvola_segmentata_la_rimisura_nomina_lo_step_2(run_dir, tmp_pa
         pipeline.run(cfg)
 ```
 
-Prima di scriverli: leggi `run_dir` (`test_pipeline.py:96`) per il valore che rende e il test `:357` per come le corse copiate cambiano `out_dir`; allinea i test a quelle forme invece di indovinarle. `shutil` va importato se manca. Se `cfg.tet` non accetta assegnazione, usa `model_copy(update=...)`. La tolleranza 20 mm è scelta perché il cubo `SIZE = (100, 40, 200)` ha spigoli vivi che un wrap a tolleranza più piccola arrotonda di poco: se il test fallisce per `WrapOltreTolleranzaError`, rimisura lo spostamento e scrivi nel test il valore e la data, non alzare la soglia a occhio.
+Prima di scriverli: leggi `run_dir` (`test_pipeline.py:96`) per il valore che rende e il test `:357` per come le corse copiate cambiano `out_dir`; allinea i test a quelle forme invece di indovinarle. `shutil` va importato se manca. Se `cfg.tet` non accetta assegnazione, usa `model_copy(update=...)`. La tolleranza 20 mm è scelta perché il cubo `SIZE = (120.0, 60.0, 240.0)` (`test_pipeline.py:14`) ha spigoli vivi che un wrap a tolleranza più piccola arrotonda di poco: se il test fallisce per `WrapOltreTolleranzaError`, rimisura lo spostamento e scrivi nel test il valore e la data, non alzare la soglia a occhio.
 
 - [ ] **Step 2: rosso**
 
@@ -679,7 +742,7 @@ Expected: FAIL, `KeyError: 'self_intersections_before'`.
 
 (a) import in testa accanto agli altri moduli di `core`: `autointersezioni`.
 
-(b) prima di `if start <= 2:` (`:658`): `source_cloud: np.ndarray | None = None` — solo se `source_cloud` non è già inizializzata sopra; controlla leggendo `run()` da `:522`.
+(b) prima di `if start <= 2:` (`:658`): `source_cloud: np.ndarray | None = None`. Verificato dall'architect a HEAD `74ae9bb`: non è inizializzata sopra (assegnazioni solo a `:664` e `:684`), quindi serve.
 
 (c) step 9 (`:777-783`) diventa:
 
@@ -733,6 +796,16 @@ git -C /Users/mario/GitHub/Tesi commit -m "feat(pipeline): step 9 prepara la sup
 - Modify: `CHANGELOG.md` (`## [Unreleased]`)
 
 HITL con Mario: la corsa è lunga e usa i suoi dati.
+
+## Ingressi degeneri
+- nessun ingresso esterno
+
+**Annotazione architect:**
+- Subagente: nessuno — thread principale con Mario (HITL). Le corse su `runs/geoandgeo-mm` costano da minuti a decine di minuti per giro (tabella §2.1 della ricerca: 27-1165 s solo per fallire) e i dati sono suoi; il CHANGELOG è testo già scritto qui sotto. Skill-gate: **false**, meccanico.
+- Sequencing: ultimo, dopo il Task 5 e il round di review.
+- Riferimento: `docs/ricerca/2026-09-21-autointersezioni-e-degeneri.md:379` — §5.1: con α 6,9 mm lo spostamento 08→wrap arriva a 27,6 mm; è la misura contro cui leggere lo Step 2. Caso reale descritto a `:71`.
+- Attenzione: il checkout non è il posto per le corse (memoria «aprire MeshRec per le prove»); lanciare su una copia di `runs/geoandgeo-mm` o con `from_step=9` in una cartella che si accetta di riscrivere. La memoria «uv run vuole la directory»: `uv run --directory /Users/mario/GitHub/Tesi/meshrec`.
+- Lo Step 1 ha due esiti ammessi: annotare **quale** dei due, non solo «ha fallito». Se esce `AutointersezioniResidueError`, lo Step 2 è l'unica via ai tetraedri su questo caso — il punto della ricerca §9 A («necessario, non sufficiente»).
 
 - [ ] **Step 1:** su `runs/geoandgeo-mm` (step 8 acceso, `taubin_iterations: 2`), senza wrap: lanciare dallo step 9 e verificare che fallisca con `AutointersezioniResidueError` **oppure** che MeshFix pulisca e TetGen si fermi in `recoversubfaces` con il messaggio nuovo. Annotare quale dei due, conteggi e tempi.
 - [ ] **Step 2:** stessa corsa con `tet.wrap_tolerance` scelto da Mario (il caso misurato: con alpha 6,9 mm lo spostamento è arrivato a 27,6 mm, quindi sotto ~30 mm lo step fallirà — è il comportamento voluto). Annotare spostamento, volume prima/dopo, tetraedri, secondi, errore geometrico rimisurato.
