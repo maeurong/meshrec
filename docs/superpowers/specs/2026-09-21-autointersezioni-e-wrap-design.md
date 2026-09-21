@@ -83,20 +83,27 @@ sulla superficie avvolta → TetGen.
   `PercentageValue` della diagonale del riquadro della superficie in ingresso:
   la wheel installata accetta `alpha`/`offset` come `PercentageValue`
   (ricerca :168-175), misurato funzionante.
-- **Tolleranza come limite, non indicazione.** Alpha non limita lo spostamento:
-  con α = 6,9 mm i dettagli si sono spostati fino a 27,6 mm (ricerca §5.1).
-  Dopo il wrap si misura la **distanza di Hausdorff bidirezionale fra
-  superficie in ingresso e superficie avvolta** (PyMeshLab
-  `get_hausdorff_distance`, nei due versi, campionando anche le facce). Se il
-  massimo supera `wrap_tolerance`, lo step **fallisce** e scrive il valore
-  misurato. Il confronto è fra superfici, non contro la nuvola: il massimo
-  contro la nuvola include già l'errore di ricostruzione (135,7 mm sul ritaglio
-  completo) e renderebbe la soglia inutilizzabile. L'errore contro la nuvola
-  resta rimisurato e riportato dal punto A.4.
+- **Tolleranza dichiarativa, non limite** (rivisto il 21/09/2026, decisione di
+  Mario dopo la review finale). Alpha non limita lo spostamento: con α = 6,9 mm
+  i dettagli si sono spostati fino a 27,6 mm (ricerca §5.1). La prima versione
+  faceva fallire lo step quando il massimo superava `wrap_tolerance`; misurato
+  su `geoandgeo-mm/06_repaired` falliva a ogni valore (tol 6,9 → max 28,6 mm;
+  tol 27,6 → max 41,3 mm), perché il massimo viene dalle cavità più strette di
+  alpha che il wrap chiude per costruzione, e alzando la tolleranza cresce
+  anche alpha. Ora dopo il wrap si misura la **distanza bidirezionale fra
+  superficie in ingresso e superficie avvolta** e la si **registra** (massimo,
+  media, 95° percentile), senza fermare lo step. La misura è una distanza
+  punto-triangolo esatta su campioni fissi (deterministica), non
+  `get_hausdorff_distance`, che è Montecarlo senza seme e sottostimava; passo
+  di campionamento `max(tol/5, spigolo mediano)`. Il confronto è fra superfici,
+  non contro la nuvola: l'errore contro la nuvola resta rimisurato e riportato
+  dal punto A.4.
 - **Metriche:** `wrap_applied: true`, `wrap_alpha_mm`, `wrap_offset_mm`,
   `wrap_hausdorff_max_mm` (i due versi), `wrap_hausdorff_mean_mm`,
-  `volume_before`, `volume_after`, `wrap_seconds`, e la nota fissa
-  «superficie sostituita, non riparata».
+  `wrap_hausdorff_p95_mm`, `wrap_volume_before`, `wrap_volume_after`,
+  `wrap_seconds`, e la nota fissa «superficie sostituita, non riparata».
+- **Riferimento dello step 11:** resta la superficie 06/08, non quella avvolta,
+  così una ripresa dallo step 10/11 produce lo stesso deck della corsa unica.
 - **Diagnosi:** il ramo `recoversubface` di `_diagnosi_del_guasto`
   (`volume.py:101-108`) oggi dice «la causa tipica sono le autointersezioni, il
   rimedio sta a monte». Diventa: autointersezioni **o** geometria quasi
@@ -118,15 +125,17 @@ sulla superficie avvolta → TetGen.
 
 ## Test
 
-- Due cubi compenetrati (autointersezione nota): A la conta > 0, MeshFix la
-  porta a 0, metriche scritte, `meshfix_clean_converged` vero.
+- Sfera con un polo spinto dentro la superficie (autointersezione nota; i due
+  cubi compenetrati non servono, MeshFix li riduce a 7 vertici dichiarando
+  successo): A la conta > 0, MeshFix la porta a 0, metriche scritte,
+  `meshfix_clean_converged` vero.
 - Superficie pulita: conteggio 0, nessuna pulizia, `meshfix_clean_converged`
   nullo, geometria invariata.
 - Pulizia che non converge (surrogato del ritorno `False`): lo step fallisce con
   il conteggio residuo nel messaggio.
 - Wrap su superficie sintetica: esce chiusa, TetGen termina, metriche scritte.
-- Tolleranza più stretta della distanza misurata: fallimento con il valore
-  misurato nel messaggio.
+- Tolleranza più stretta della distanza misurata: nessun fallimento, massimo,
+  media e 95° percentile registrati.
 - `wrap_tolerance` assente o `None`: comportamento e impronte degli step 1-8
   invariati (memoria «togliere un campo sposta l'impronta»: verificare che
   aggiungere un campo con predefinito `None` non sposti le impronte esistenti).
