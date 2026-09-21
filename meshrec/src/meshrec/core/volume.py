@@ -125,6 +125,34 @@ def _diagnosi_del_guasto(messaggio: str, nobisect: bool) -> str:
     )
 
 
+def verifica_superficie_pronta(faces: np.ndarray) -> None:
+    """Superficie vuota o non chiusa: solleva prima che TetGen o il wrap la vedano.
+
+    Estratta da `tetrahedralize` perche' `autointersezioni.prepara_ingresso`
+    deve applicare lo stesso controllo, con lo stesso testo, prima del proprio
+    wrap (specs/2026-09-21-autointersezioni-e-wrap-design.md:111-112).
+    """
+    faces = np.asarray(faces)
+    # La mesh vuota prima di quella aperta: da quando `is_watertight` rende
+    # `False` sul vuoto (e prima rendeva `True`, lasciandola passare a TetGen),
+    # senza questo ramo il messaggio uscirebbe «non chiusa: 0 spigoli di
+    # bordo», che si contraddice, e suggerirebbe di riparare una superficie che
+    # non ha facce da riparare.
+    if len(faces) == 0:
+        raise NotWatertightError(
+            "superficie senza facce: non c'è nulla da tetraedrizzare. Gli step a "
+            "monte non hanno prodotto una superficie, e il rimedio sta lì, non "
+            "nella riparazione."
+        )
+    if not is_watertight(faces):
+        open_edges = len(boundary_edges(faces))
+        raise NotWatertightError(
+            f"superficie non chiusa: {open_edges} spigoli di bordo. "
+            "TetGen richiede un ingresso manifold chiuso; ripara la superficie "
+            "con core.repair.repair_surface prima di tetraedrizzare."
+        )
+
+
 def tetrahedralize(
     vertices: np.ndarray,
     faces: np.ndarray,
@@ -153,24 +181,7 @@ def tetrahedralize(
     muro reale non porta a termine il raffinamento.
     """
     faces = np.asarray(faces)
-    # La mesh vuota prima di quella aperta: da quando `is_watertight` rende
-    # `False` sul vuoto (e prima rendeva `True`, lasciandola passare a TetGen),
-    # senza questo ramo il messaggio uscirebbe «non chiusa: 0 spigoli di
-    # bordo», che si contraddice, e suggerirebbe di riparare una superficie che
-    # non ha facce da riparare.
-    if len(faces) == 0:
-        raise NotWatertightError(
-            "superficie senza facce: non c'è nulla da tetraedrizzare. Gli step a "
-            "monte non hanno prodotto una superficie, e il rimedio sta lì, non "
-            "nella riparazione."
-        )
-    if not is_watertight(faces):
-        open_edges = len(boundary_edges(faces))
-        raise NotWatertightError(
-            f"superficie non chiusa: {open_edges} spigoli di bordo. "
-            "TetGen richiede un ingresso manifold chiuso; ripara la superficie "
-            "con core.repair.repair_surface prima di tetraedrizzare."
-        )
+    verifica_superficie_pronta(faces)
 
     generator = tetgen.TetGen(
         np.ascontiguousarray(vertices, dtype=np.float64),

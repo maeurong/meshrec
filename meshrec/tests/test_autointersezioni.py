@@ -3,6 +3,7 @@ import open3d as o3d
 import pytest
 
 from meshrec.core import autointersezioni as ai
+from meshrec.core import config, volume
 
 
 def _sfera(polo: tuple[float, float, float] | None = None):
@@ -106,3 +107,94 @@ def test_conteggio_uguale_fra_facce_int64_e_int32():
     assert ai.conta_autointersezioni(v, f.astype(np.int64)) == ai.conta_autointersezioni(
         v, f.astype(np.int32)
     )
+
+
+# prepara_ingresso (Task 3): dal brief, verbatim.
+
+
+def test_superficie_pulita_passa_intatta():
+    v, f = _sfera()
+    ov, of, misure, cambiata = ai.prepara_ingresso(v, f, config.TetConfig(), step_8_acceso=False)
+    assert cambiata is False
+    assert of is f or np.array_equal(of, f)
+    assert misure["self_intersections_before"] == 0
+    assert misure["meshfix_clean_converged"] is None
+    assert misure["wrap_applied"] is False
+
+
+def test_il_polo_passante_viene_pulito_e_registrato():
+    v, f = _sfera((0.0, 0.0, -70.0))
+    _, of, misure, cambiata = ai.prepara_ingresso(v, f, config.TetConfig(), step_8_acceso=False)
+    assert cambiata is True
+    assert misure["self_intersections_before"] == 80
+    assert misure["self_intersections_after"] == 0
+    assert misure["meshfix_clean_converged"] is True
+    assert misure["triangles_removed_by_clean"] == len(f) - len(of)
+
+
+def test_una_pulizia_che_non_converge_ferma_lo_step(monkeypatch):
+    v, f = _sfera((0.0, 0.0, -70.0))
+    monkeypatch.setattr(ai, "pulisci_autointersezioni", lambda v, f: (v, f, False))
+    with pytest.raises(ai.AutointersezioniResidueError) as caduta:
+        ai.prepara_ingresso(v, f, config.TetConfig(), step_8_acceso=True)
+    messaggio = str(caduta.value)
+    assert "80" in messaggio
+    assert "step 8" in messaggio
+    assert "tet.wrap_tolerance" in messaggio
+
+
+def test_il_wrap_oltre_tolleranza_ferma_lo_step_col_valore_misurato():
+    v, f = _sfera((0.0, 0.0, -70.0))
+    with pytest.raises(ai.WrapOltreTolleranzaError, match=r"3\d[,.]\d+ mm"):
+        ai.prepara_ingresso(v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False)
+
+
+def test_il_wrap_entro_tolleranza_sostituisce_e_dichiara(monkeypatch):
+    chiamate = []
+    monkeypatch.setattr(ai, "pulisci_autointersezioni", lambda *a: chiamate.append(a))
+    v, f = _sfera()
+    _, _, misure, cambiata = ai.prepara_ingresso(
+        v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False
+    )
+    assert cambiata is True and chiamate == []
+    assert misure["wrap_applied"] is True
+    assert misure["wrap_hausdorff_max_mm"] == pytest.approx(0.5, abs=0.05)
+    assert misure["wrap_volume_after"] > misure["wrap_volume_before"]
+    assert misure["wrap_note"] == "superficie sostituita, non riparata"
+
+
+# Le 4 righe aggiunte dall'architect al contratto ingressi: nessun test sopra
+# le copre (superficie non chiusa, superficie vuota col wrap acceso, residue
+# del wrap che non fermano, e l'ordine dei due controlli col wrap spento).
+
+
+def test_superficie_aperta_ferma_prima_del_wrap():
+    v, f = _sfera()
+    f_aperta = f[1:]  # una faccia tolta: bordo aperto
+    with pytest.raises(volume.NotWatertightError):
+        ai.prepara_ingresso(v, f_aperta, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False)
+
+
+def test_superficie_senza_facce_wrap_acceso_da_notwatertight_non_valueerror():
+    v = np.zeros((0, 3))
+    f = np.zeros((0, 3), dtype=np.int64)
+    with pytest.raises(volume.NotWatertightError, match="senza facce"):
+        ai.prepara_ingresso(v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False)
+
+
+def test_wrap_con_residue_le_registra_senza_fermare_lo_step(monkeypatch):
+    monkeypatch.setattr(ai, "conta_autointersezioni", lambda *a: 3)
+    v, f = _sfera()
+    _, _, misure, cambiata = ai.prepara_ingresso(
+        v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False
+    )
+    assert cambiata is True
+    assert misure["wrap_applied"] is True
+    assert misure["self_intersections_after"] == 3
+
+
+def test_wrap_spento_superficie_aperta_con_autointersezioni_da_notwatertight():
+    v, f = _sfera((0.0, 0.0, -70.0))
+    f_aperta = f[1:]  # bordo aperto, oltre al polo passante
+    with pytest.raises(volume.NotWatertightError):
+        ai.prepara_ingresso(v, f_aperta, config.TetConfig(), step_8_acceso=False)

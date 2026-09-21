@@ -11,6 +11,10 @@ import time
 
 import numpy as np
 
+from meshrec.core import volume
+from meshrec.core.config import TetConfig
+from meshrec.core.quality import mesh_volume
+
 
 def _mesh_set(vertices: np.ndarray, faces: np.ndarray):
     import pymeshlab
@@ -127,3 +131,79 @@ def spostamento(
         "max": max(float(r["max"]) for r in versi.values()),
         "mean": max(float(r["mean"]) for r in versi.values()),
     }
+
+
+class AutointersezioniResidueError(ValueError):
+    """MeshFix non ha tolto le autointersezioni: TetGen si fermerebbe comunque."""
+
+
+class WrapOltreTolleranzaError(ValueError):
+    """L'alpha wrap ha spostato la superficie oltre quanto l'utente ha dichiarato."""
+
+
+def prepara_ingresso(
+    vertices: np.ndarray, faces: np.ndarray, cfg: TetConfig, *, step_8_acceso: bool
+) -> tuple[np.ndarray, np.ndarray, dict[str, object], bool]:
+    """La superficie che TetGen riceve, e cio' che le e' successo per arrivarci."""
+    # Stesso controllo di volume.tetrahedralize, e prima di lui: la spec vuole
+    # che vuota/aperta si fermino "prima del wrap" (specs/…-design.md:111-112).
+    volume.verifica_superficie_pronta(faces)
+
+    prima = conta_autointersezioni(vertices, faces)
+    misure: dict[str, object] = {
+        "self_intersections_before": prima,
+        "self_intersections_after": prima,
+        "meshfix_clean_converged": None,
+        "triangles_removed_by_clean": 0,
+        "wrap_applied": False,
+    }
+
+    if cfg.wrap_tolerance is not None:
+        # Col wrap MeshFix non serve: la superficie viene rifatta comunque.
+        wv, wf, del_wrap = avvolgi(vertices, faces, cfg.wrap_tolerance)
+        distanza = spostamento(vertices, faces, wv, wf)
+        misure.update(del_wrap)
+        misure.update(
+            wrap_applied=True,
+            wrap_hausdorff_max_mm=distanza["max"],
+            wrap_hausdorff_mean_mm=distanza["mean"],
+            wrap_volume_before=mesh_volume(vertices, faces),
+            wrap_volume_after=mesh_volume(wv, wf),
+            wrap_note="superficie sostituita, non riparata",
+            # Residue del wrap: si registrano e non fermano. Con alpha piccolo
+            # restano (506 sulla sfera di prova a 0,5 mm) e TetGen chiude lo stesso.
+            self_intersections_after=conta_autointersezioni(wv, wf),
+        )
+        if distanza["max"] > cfg.wrap_tolerance:
+            raise WrapOltreTolleranzaError(
+                f"l'alpha wrap ha spostato la superficie fino a {distanza['max']:.2f} mm "
+                f"contro i {cfg.wrap_tolerance:g} mm ammessi da tet.wrap_tolerance: le "
+                "cavità più strette di alpha sono sparite. Alza la tolleranza se lo "
+                "spostamento è accettabile per il modello, abbassala per seguire meglio "
+                "la superficie (più triangoli, più tempo)."
+            )
+        return wv, wf, misure, True
+
+    if prima == 0:
+        return vertices, faces, misure, False
+
+    pv, pf, convergito = pulisci_autointersezioni(vertices, faces)
+    dopo = conta_autointersezioni(pv, pf)
+    misure.update(
+        self_intersections_after=dopo,
+        meshfix_clean_converged=convergito,
+        triangles_removed_by_clean=int(len(faces) - len(pf)),
+    )
+    if not convergito or dopo > 0:
+        origine = (
+            " Lo step 8 è acceso ed è lui a crearle: sulla scansione misurata il "
+            "remeshing ne ha introdotte 646 e Taubin le ha portate a 7747."
+            if step_8_acceso
+            else ""
+        )
+        raise AutointersezioniResidueError(
+            f"{dopo} facce autointersecanti restano dopo la pulizia di MeshFix "
+            f"(erano {prima}): TetGen si fermerebbe nel recupero del bordo.{origine} "
+            "Accendi tet.wrap_tolerance per sostituire la superficie con un alpha wrap."
+        )
+    return pv, pf, misure, True
