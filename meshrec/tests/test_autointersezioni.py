@@ -1,5 +1,3 @@
-import re
-
 import numpy as np
 import open3d as o3d
 import pytest
@@ -168,32 +166,42 @@ def test_una_pulizia_che_non_converge_ferma_lo_step(monkeypatch):
     assert "80" in messaggio
     assert "step 8" in messaggio
     assert "tet.wrap_tolerance" in messaggio
+    # I numeri di una prova non sono quelli della corsa dell'utente.
+    assert "646" not in messaggio and "7747" not in messaggio
 
 
-def test_il_wrap_oltre_tolleranza_ferma_lo_step_col_valore_misurato():
-    """Il messaggio porta il valore misurato, sopra la tolleranza dichiarata.
-    Non un regex sul primo intero: col campionamento deterministico il valore
-    non è più 3x,xx per costruzione, solo > 5.0."""
+def test_convergenza_non_dichiarata_con_zero_residue_non_dice_zero_restano(monkeypatch):
+    conteggi = iter([80, 0])
+    monkeypatch.setattr(ai, "conta_autointersezioni", lambda *a: next(conteggi))
+    monkeypatch.setattr(ai, "pulisci_autointersezioni", lambda v, f: (v, f, False))
+    with pytest.raises(ai.AutointersezioniResidueError) as caduta:
+        ai.prepara_ingresso(*_sfera(), config.TetConfig(), step_8_acceso=False)
+    messaggio = str(caduta.value)
+    assert "0 facce autointersecanti restano" not in messaggio
+    assert "convergenza" in messaggio
+
+
+def test_il_wrap_oltre_la_tolleranza_registra_lo_spostamento_e_non_ferma():
+    """Tolleranza dichiarativa (decisione di Mario, 21/09/2026): sul caso reale
+    il massimo viene dalle cavita' piu' strette di alpha, che il wrap chiude
+    per costruzione, e col limite lo step falliva a ogni valore. 30,38 mm e'
+    il massimo che il Montecarlo di PyMeshLab aveva trovato su questa coppia."""
     v, f = _sfera((0.0, 0.0, -70.0))
-    with pytest.raises(ai.WrapOltreTolleranzaError) as caduta:
-        ai.prepara_ingresso(v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False)
-    trovato = re.search(r"fino a ([\d,.]+) mm", str(caduta.value))
-    assert trovato is not None
-    assert float(trovato.group(1).replace(",", ".")) > 5.0
-
-
-def test_il_wrap_entro_tolleranza_sostituisce_e_dichiara(monkeypatch):
-    chiamate = []
-    monkeypatch.setattr(ai, "pulisci_autointersezioni", lambda *a: chiamate.append(a))
-    v, f = _sfera()
     _, _, misure, cambiata = ai.prepara_ingresso(
         v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False
     )
-    assert cambiata is True and chiamate == []
-    assert misure["wrap_applied"] is True
-    assert misure["wrap_hausdorff_max_mm"] == pytest.approx(0.5, abs=0.05)
-    assert misure["wrap_volume_after"] > misure["wrap_volume_before"]
-    assert misure["wrap_note"] == "superficie sostituita, non riparata"
+    assert cambiata is True
+    assert misure["wrap_hausdorff_max_mm"] >= 30.38
+    assert misure["wrap_hausdorff_mean_mm"] <= misure["wrap_hausdorff_p95_mm"] <= misure["wrap_hausdorff_max_mm"]
+
+
+def test_il_wrap_di_una_superficie_senza_ingombro_e_un_valueerror_leggibile():
+    """Tutti i vertici coincidenti: la diagonale e' 0 e la percentuale di
+    PyMeshLab sarebbe una divisione per zero, non un messaggio."""
+    v = np.zeros((4, 3))
+    f = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]], dtype=np.int64)
+    with pytest.raises(ValueError, match="diagonale"):
+        ai.prepara_ingresso(v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False)
 
 
 # Le 4 righe aggiunte dall'architect al contratto ingressi: nessun test sopra
@@ -282,4 +290,5 @@ def test_spostamento_e_indipendente_dalla_dimensione_del_lotto(monkeypatch):
 def test_nessun_campione_da_media_zero():
     v, f = _sfera()
     vuoti_v, vuoti_f = np.empty((0, 3)), np.empty((0, 3), dtype=np.int64)
-    assert ai._distanza_massima_e_media(vuoti_v, vuoti_f, 1.0, v, f) == (0.0, 0.0)
+    massimo, media, distanze = ai._distanza_massima_e_media(vuoti_v, vuoti_f, 1.0, v, f)
+    assert (massimo, media, len(distanze)) == (0.0, 0.0, 0)

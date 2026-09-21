@@ -76,6 +76,11 @@ def avvolgi(
         raise ValueError(f"tolleranza del wrap {tolleranza}: deve essere positiva, in mm")
     mesh_set = _mesh_set(vertices, faces)
     diagonale = float(mesh_set.current_mesh().bounding_box().diagonal())
+    if not diagonale > 0.0:
+        raise ValueError(
+            "superficie senza ingombro (diagonale del riquadro nulla, vertici "
+            "tutti coincidenti): l'alpha wrap non ha una scala su cui lavorare"
+        )
     offset = tolleranza / 10.0
     avvio = time.perf_counter()
     mesh_set.apply_filter(
@@ -163,10 +168,9 @@ def _lotti_di_campioni(vertices: np.ndarray, faces: np.ndarray, passo: float):
 # un triangolo grande col baricentro lontano, circondato da 12 piccoli, puo'
 # restare fuori dagli 8 piu' vicini anche se la sua superficie e' a 0 mm dal
 # punto (riprodotto in review: 0,99 mm invece di 0). La direzione dell'errore
-# e' fail-safe: sovrastima, mai sottostima, quindi puo' far scattare un
-# `WrapOltreTolleranzaError` di troppo ma mai farne mancare uno vero. Se
-# compaiono rifiuti spuri su mesh con taglie di triangolo molto disomogenee,
-# la via d'uscita e' `query_ball_point` sui centroidi (raggio, non k fisso)
+# e' fail-safe: sovrastima, mai sottostima lo spostamento registrato. Se
+# compaiono spostamenti gonfiati su mesh con taglie di triangolo molto
+# disomogenee, la via d'uscita e' `query_ball_point` sui centroidi (raggio, non k fisso)
 # al posto di questo k.
 _CANDIDATI_PER_PUNTO = 8
 _LOTTO_PUNTI = 20_000
@@ -227,8 +231,10 @@ def _distanza_punti_a_superficie(punti: np.ndarray, vertices: np.ndarray, faces:
     return distanze
 
 
-def _distanza_massima_e_media(vertices: np.ndarray, faces: np.ndarray, passo: float, verso_v: np.ndarray, verso_f: np.ndarray) -> tuple[float, float]:
-    """Massimo e media della distanza dai campioni di (vertices, faces) verso l'altra superficie.
+def _distanza_massima_e_media(
+    vertices: np.ndarray, faces: np.ndarray, passo: float, verso_v: np.ndarray, verso_f: np.ndarray
+) -> tuple[float, float, np.ndarray]:
+    """Massimo, media e distanze (float32) dai campioni di (vertices, faces) verso l'altra superficie.
 
     A lotti (`_lotti_di_campioni`): massimo e somma/conteggio si aggiornano
     lotto per lotto, cosi' non serve mai avere tutti i campioni in memoria
@@ -240,6 +246,10 @@ def _distanza_massima_e_media(vertices: np.ndarray, faces: np.ndarray, passo: fl
     massimo = 0.0
     somme: list[float] = []
     conteggio = 0
+    # ponytail: tutte le distanze tenute in float32 per il percentile, 4 byte
+    # a campione: 40 M campioni = 160 MB. Se la memoria diventa il problema,
+    # un istogramma a passo fisso aggiornato lotto per lotto le sostituisce.
+    distanze: list[np.ndarray] = []
     for lotto in _lotti_di_campioni(vertices, faces, passo):
         if len(lotto) == 0:
             continue
@@ -247,7 +257,9 @@ def _distanza_massima_e_media(vertices: np.ndarray, faces: np.ndarray, passo: fl
         massimo = max(massimo, float(d.max()))
         somme.append(math.fsum(d))
         conteggio += len(d)
-    return massimo, (math.fsum(somme) / conteggio if conteggio else 0.0)
+        distanze.append(d.astype(np.float32))
+    tutte = np.concatenate(distanze) if distanze else np.empty(0, dtype=np.float32)
+    return massimo, (math.fsum(somme) / conteggio if conteggio else 0.0), tutte
 
 
 def spostamento(
@@ -283,30 +295,34 @@ def spostamento(
     (facce a lato ~1 % della diagonale) tiene un punto a faccia, veloce
     (159 200 facce, 557 202 campioni, ~2 s, misurato su una sfera fitta).
     Chi conosce una tolleranza piu' stretta (`prepara_ingresso`, col wrap)
-    passa un passo piu' fine: la tolleranza e' un limite, non
-    un'indicazione, e un campione troppo rado la farebbe rispettare per caso.
+    passa un passo piu' fine: un campione troppo rado sottostima lo
+    spostamento che si registra.
 
     `mean` e' il **massimo** delle due medie direzionali: nome ingannevole ma
-    voluto, cautelativo.
+    voluto, cautelativo. `p95` e' il 95° percentile dei campioni dei due
+    versi insieme.
     """
     if passo_mm is None:
         passo_mm = 0.01 * max(_diagonale(va), _diagonale(vb))
-    max_a_verso_b, mean_a_verso_b = _distanza_massima_e_media(va, fa, passo_mm, vb, fb)
-    max_b_verso_a, mean_b_verso_a = _distanza_massima_e_media(vb, fb, passo_mm, va, fa)
+    max_a_verso_b, mean_a_verso_b, d_a = _distanza_massima_e_media(va, fa, passo_mm, vb, fb)
+    max_b_verso_a, mean_b_verso_a, d_b = _distanza_massima_e_media(vb, fb, passo_mm, va, fa)
+    insieme = np.concatenate([d_a, d_b])
     return {
         "max_a_verso_b": max_a_verso_b,
         "max_b_verso_a": max_b_verso_a,
         "max": max(max_a_verso_b, max_b_verso_a),
         "mean": max(mean_a_verso_b, mean_b_verso_a),
+        "p95": float(np.percentile(insieme, 95)) if len(insieme) else 0.0,
     }
 
 
 class AutointersezioniResidueError(ValueError):
-    """MeshFix non ha tolto le autointersezioni: TetGen si fermerebbe comunque."""
+    """MeshFix ha lasciato autointersezioni, o non ha dichiarato la convergenza.
 
-
-class WrapOltreTolleranzaError(ValueError):
-    """L'alpha wrap ha spostato la superficie oltre quanto l'utente ha dichiarato."""
+    Nel secondo caso il conteggio residuo puo' essere zero: MeshFix si e'
+    fermato al tetto dei giri senza garantire la superficie, e TetGen potrebbe
+    fermarsi comunque.
+    """
 
 
 def prepara_ingresso(
@@ -329,9 +345,11 @@ def prepara_ingresso(
     if cfg.wrap_tolerance is not None:
         # Col wrap MeshFix non serve: la superficie viene rifatta comunque.
         wv, wf, del_wrap = avvolgi(vertices, faces, cfg.wrap_tolerance)
-        # La tolleranza qui sotto e' un limite vero, non un'indicazione: il
-        # passo di default di spostamento() (1% della diagonale) sottostima
-        # sui difetti locali (misurato: ~30 mm contro un vero 30,82 mm sulla
+        # Lo spostamento si misura e si registra, non ferma lo step
+        # (decisione del 21/09/2026: sul caso reale il massimo viene dalle
+        # cavita' piu' strette di alpha, che il wrap chiude per costruzione,
+        # e col limite lo step falliva a ogni tolleranza). Il passo di default
+        # di spostamento() (1% della diagonale) sottostima sui difetti locali (misurato: ~30 mm contro un vero 30,82 mm sulla
         # sfera col polo passante, wrap 5 mm). tol/5 raggiunge gia' il valore
         # a cui il campionamento converge (uguale a tol/10, la meta' dei
         # punti); tol stesso no (29,86 mm, sotto soglia). 21/09/2026.
@@ -341,6 +359,7 @@ def prepara_ingresso(
             wrap_applied=True,
             wrap_hausdorff_max_mm=distanza["max"],
             wrap_hausdorff_mean_mm=distanza["mean"],
+            wrap_hausdorff_p95_mm=distanza["p95"],
             wrap_volume_before=mesh_volume(vertices, faces),
             wrap_volume_after=mesh_volume(wv, wf),
             wrap_note="superficie sostituita, non riparata",
@@ -348,14 +367,6 @@ def prepara_ingresso(
             # restano (506 sulla sfera di prova a 0,5 mm) e TetGen chiude lo stesso.
             self_intersections_after=conta_autointersezioni(wv, wf),
         )
-        if distanza["max"] > cfg.wrap_tolerance:
-            raise WrapOltreTolleranzaError(
-                f"l'alpha wrap ha spostato la superficie fino a {distanza['max']:.2f} mm "
-                f"contro i {cfg.wrap_tolerance:g} mm ammessi da tet.wrap_tolerance: le "
-                "cavità più strette di alpha sono sparite. Alza la tolleranza se lo "
-                "spostamento è accettabile per il modello, abbassala per seguire meglio "
-                "la superficie (più triangoli, più tempo)."
-            )
         return wv, wf, misure, True
 
     if prima == 0:
@@ -369,15 +380,22 @@ def prepara_ingresso(
         triangles_removed_by_clean=int(len(faces) - len(pf)),
     )
     if not convergito or dopo > 0:
+        esito = (
+            f"{dopo} facce autointersecanti restano dopo la pulizia di MeshFix "
+            f"(erano {prima}): TetGen si fermerebbe nel recupero del bordo."
+            if dopo > 0
+            else f"MeshFix non ha dichiarato la convergenza; il conteggio residuo è "
+            f"{dopo} (erano {prima}), ma la superficie non è garantita e TetGen "
+            "potrebbe fermarsi nel recupero del bordo."
+        )
         origine = (
-            " Lo step 8 è acceso ed è lui a crearle: sulla scansione misurata il "
-            "remeshing ne ha introdotte 646 e Taubin le ha portate a 7747."
+            " Lo step 8 è acceso ed è la causa tipica: remeshing e Taubin "
+            "introducono autointersezioni."
             if step_8_acceso
             else ""
         )
         raise AutointersezioniResidueError(
-            f"{dopo} facce autointersecanti restano dopo la pulizia di MeshFix "
-            f"(erano {prima}): TetGen si fermerebbe nel recupero del bordo.{origine} "
-            "Accendi tet.wrap_tolerance per sostituire la superficie con un alpha wrap."
+            f"{esito}{origine} Accendi tet.wrap_tolerance per sostituire la "
+            "superficie con un alpha wrap."
         )
     return pv, pf, misure, True
