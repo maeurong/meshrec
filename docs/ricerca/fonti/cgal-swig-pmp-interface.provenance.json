@@ -1,0 +1,2 @@
+{"derived_from": {"path": "https://raw.githubusercontent.com/CGAL/cgal-swig-bindings/HEAD/SWIG_CGAL/Polygon_mesh_processing/CGAL_Polygon_mesh_processing.i", "sha256": "55c634b45ec05f34c1ee5f62ad5b4943754048b8fa96914bc22153bed61d9731", "bytes": 34136},
+ "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}

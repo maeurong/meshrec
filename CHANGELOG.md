@@ -5,6 +5,30 @@ con [versionamento semantico](https://semver.org/lang/it/).
 
 ## [Unreleased]
 
+### Aggiunto
+
+- Lo step 9 conta le facce autointersecanti prima di TetGen e, se ce ne sono, le fa pulire da
+  MeshFix leggendone l'esito. Se ne restano, si ferma dicendo quante e, con lo step 8 acceso,
+  che è lui la causa tipica. Con la superficie cambiata, riscrive l'errore geometrico contro la
+  nuvola nelle metriche dello step 9.
+- `tet.wrap_tolerance` [mm], spento di predefinito: sostituisce la superficie con un alpha wrap
+  di CGAL (alpha = tolleranza, offset = alpha/10) e registra lo spostamento fra le due superfici
+  (massimo, media, 95° percentile) senza fermare lo step. Su `geoandgeo-mm`, che senza wrap
+  si ferma in `recoversubfaces`, a 6,9 mm arriva al deck:
+  - le facce autointersecanti passano da 7747 a 22;
+  - il volume cresce del 2,9 %;
+  - lo spostamento vale 27,8 mm di massimo, 2,8 di media e 9,2 al 95° percentile;
+  - TetGen genera 1,59 M elementi C3D10 senza elementi invertiti.
+
+### Modificato
+
+- Il messaggio di TetGen sul guasto in `recoversubfaces` propone `tet.wrap_tolerance`, o di
+  abbassarla se il wrap è già acceso.
+- Lo step 11 prende come riferimento la superficie degli step 6/8 anche quando lo step 9 l'ha
+  pulita o avvolta, così una ripresa dallo step 10 o 11 dà lo stesso deck della corsa intera.
+- Le impronte degli step 9-12 delle corse già su disco cambiano una volta: il blocco `tet` ha
+  un campo in più.
+
 ## [1.0.0] — 2026-09-12
 
 Prima versione: quella discussa in sede di tesi.

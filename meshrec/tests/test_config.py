@@ -528,6 +528,35 @@ def test_una_regione_dichiarata_entra_nell_impronta():
     assert fingerprint(piena) != fingerprint(vuota)
 
 
+def test_wrap_tolerance_e_spento_e_rifiuta_i_valori_non_positivi():
+    assert config.TetConfig().wrap_tolerance is None
+    for sbagliato in (0.0, -1.0, float("nan"), float("inf")):
+        with pytest.raises(ValidationError):
+            config.TetConfig(wrap_tolerance=sbagliato)
+
+
+def test_wrap_tolerance_acceso_sposta_l_impronta_di_candidato():
+    from meshrec.core.sweep import fingerprint
+
+    base = config.PipelineConfig(input=config.InputConfig(path="nuvola.ply"))
+    acceso = base.model_copy(update={"tet": config.TetConfig(wrap_tolerance=5.0)})
+    assert fingerprint(acceso) != fingerprint(base)
+
+
+def test_wrap_tolerance_null_esplicito_nello_yaml_ha_la_stessa_impronta_dell_assente(tmp_path):
+    """`tet: {wrap_tolerance: null}` e il campo assente sono lo stesso esperimento."""
+    from meshrec.core.sweep import fingerprint
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "input:\n  path: nuvola.ply\ntet:\n  wrap_tolerance: null\n", encoding="utf-8"
+    )
+    esplicito = config.load_config(path)
+    assente = config.PipelineConfig(input=config.InputConfig(path="nuvola.ply"))
+    assert esplicito.tet.wrap_tolerance is None
+    assert fingerprint(esplicito) == fingerprint(assente)
+
+
 def test_una_regione_e_la_sola_membratura():
     """Un campo e basta: quale prisma. Il materiale non c'e' piu' -- si assegna
     in Abaqus sull'`*ELSET` che il deck scrive (08/09/2026, PR

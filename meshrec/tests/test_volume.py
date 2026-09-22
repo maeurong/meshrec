@@ -137,6 +137,7 @@ def test_l_invasione_delle_facce_consiglia_nobisect_e_non_un_min_ratio_piu_alto(
     # Il consiglio vecchio non deve sopravvivere accanto a quello nuovo: due
     # rimedi contraddittori nello stesso messaggio non sono una diagnosi.
     assert "Alza tet.min_ratio" not in messaggio
+    assert "tet.wrap_tolerance" not in messaggio
 
 
 def test_a_nobisect_gia_acceso_l_invasione_non_e_piu_il_sospetto(monkeypatch):
@@ -172,8 +173,9 @@ def test_il_recupero_del_bordo_non_e_un_problema_di_qualita(monkeypatch):
 
     E' il recupero delle facce di ingresso nella triangolazione di Delaunay: il
     vincolo raggio-spigolo non e' ancora entrato in gioco, quindi consigliarlo
-    e' falso a prescindere dalla geometria. La causa tipica sono le
-    autointersezioni della superficie, e il rimedio sta a monte.
+    e' falso a prescindere dalla geometria. Le autointersezioni sono una
+    causa, non l'unica: su runs/geoandgeo-mm fallisce anche una superficie
+    che TetGen `-d` dichiara corretta.
     """
     monkeypatch.setattr(
         volume.tetgen,
@@ -190,6 +192,30 @@ def test_il_recupero_del_bordo_non_e_un_problema_di_qualita(monkeypatch):
     messaggio = str(caduta.value)
     assert "Alza tet.min_ratio" not in messaggio
     assert "nobisect" not in messaggio
+    assert "tet.wrap_tolerance" in messaggio
+    assert "sostituita" in messaggio
+
+
+def test_col_wrap_gia_acceso_il_recupero_del_bordo_non_propone_di_accenderlo(monkeypatch):
+    """La superficie che TetGen ha rifiutato e' gia' l'alpha wrap: proporre il
+    wrap come ripiego manda a cercare dove si e' gia' cercato. Il rimedio e'
+    un alpha piu' piccolo, che segue la superficie piu' da vicino."""
+    monkeypatch.setattr(
+        volume.tetgen,
+        "TetGen",
+        _TetGenCheFallisce("Internal TetGen error within `recoversubfaces`."),
+    )
+    vertices, faces = synth.box_mesh(SIZE)
+
+    with pytest.raises(volume.RefinementFailedError) as caduta:
+        volume.tetrahedralize_with_metrics(
+            vertices, faces, config.TetConfig(wrap_tolerance=5.0)
+        )
+
+    messaggio = str(caduta.value)
+    assert "Il ripiego è tet.wrap_tolerance" not in messaggio
+    assert "ccendi" not in messaggio
+    assert "abbassare tet.wrap_tolerance" in messaggio
 
 
 def test_un_guasto_che_non_si_riconosce_non_viene_diagnosticato(monkeypatch):

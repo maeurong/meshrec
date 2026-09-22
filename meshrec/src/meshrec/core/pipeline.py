@@ -16,6 +16,7 @@ import numpy as np
 from meshrec.core import (
     abaqus,
     attribuzione,
+    autointersezioni,
     io,
     quality,
     repair,
@@ -655,6 +656,7 @@ def run(cfg: PipelineConfig) -> dict[str, object]:
                 or io.mean_spacing(points, cfg.input.spacing_sample, cfg.input.seed)
             )
 
+        source_cloud: np.ndarray | None = None
         if start <= 2:
             in_corso = 2
             avvio = time.monotonic()
@@ -666,15 +668,19 @@ def run(cfg: PipelineConfig) -> dict[str, object]:
             if stop <= 2:
                 raise _FermataRichiesta
         elif start <= 7 or stop >= 12:
-            # La nuvola segmentata (uscita dello step 2) ha DUE consumatori e
-            # nessun altro: l'errore geometrico dello step 7 e il prior dello
-            # step 12. La condizione li nomina entrambi invece di caricarla
-            # sempre, e non e' una micro-ottimizzazione: caricarla quando non
-            # gira nessuno dei due faceva FALLIRE una corsa che non ne aveva
-            # bisogno. «Esegui solo lo step 9» in una cartella senza
-            # 02_segmented.ply si fermava per un artefatto che quello step non
-            # tocca -- ed e' proprio il caso che from_step == to_step esiste per
-            # servire (config.py, RunConfig).
+            # La nuvola segmentata (uscita dello step 2) ha qui DUE consumatori
+            # nominati: l'errore geometrico dello step 7 e il prior dello step
+            # 12. Lo step 9 e' un terzo consumatore, ma condizionale (solo se
+            # la superficie e' cambiata dopo lo step 7, o se lo step 8 e'
+            # acceso) e serve gia' da questa lettura anticipata quando
+            # `stop >= 12`: se non serve, la carica lui stesso a valle, pigra.
+            # La condizione qui nomina 7 e 12 invece di caricarla sempre, e non
+            # e' una micro-ottimizzazione: caricarla quando non serve a nessuno
+            # dei tre faceva FALLIRE una corsa che non ne aveva bisogno.
+            # «Esegui solo lo step 9» in una cartella senza 02_segmented.ply si
+            # fermava per un artefatto che quello step non tocca -- ed e'
+            # proprio il caso che from_step == to_step esiste per servire
+            # (config.py, RunConfig).
             #
             # `chiede` e' lo step che la consuma, non quello da cui la corsa
             # riparte. Nominare `start` produceva un consiglio che distrugge il
@@ -778,9 +784,24 @@ def run(cfg: PipelineConfig) -> dict[str, object]:
         if start <= 9:
             in_corso = 9
             avvio = time.monotonic()
-            nodes, tets, step_metrics = volume.tetrahedralize_with_metrics(
-                vertices, faces, cfg.tet
+            # Nomi propri per la superficie preparata: `vertices` resta 06/08,
+            # la stessa che la ripresa dallo step 11 ricarica.
+            v_tet, f_tet, preparazione, cambiata = autointersezioni.prepara_ingresso(
+                vertices, faces, cfg.tet, step_8_acceso=cfg.simplify.enabled
             )
+            nodes, tets, step_metrics = volume.tetrahedralize_with_metrics(
+                v_tet, f_tet, cfg.tet
+            )
+            step_metrics = {**preparazione, **step_metrics}
+            # Lo step 7 misura l'errore prima dello step 8 e di questa
+            # preparazione: se la superficie e' cambiata dopo, quel numero non
+            # descrive piu' la superficie che TetGen ha riempito.
+            if cambiata or cfg.simplify.enabled:
+                if source_cloud is None:
+                    source_cloud, _ = _ingresso_di_ripresa(9, 2, out, io.read_cloud)
+                step_metrics["geometric_error"] = quality.geometric_error(
+                    v_tet, f_tet, source_cloud
+                )
             metrics["09_tetrahedralize"] = step_metrics
             # Il tipo va dichiarato: `write_vtu` non lo indovina dal numero di
             # colonne, e il suo predefinito e' il lineare. Senza, un maglio
@@ -828,9 +849,11 @@ def run(cfg: PipelineConfig) -> dict[str, object]:
                 nome: np.flatnonzero(etichette == posizione)
                 for posizione, nome in enumerate(prismi)
             }
-        # `vertices` e' la superficie da cui la mesh di volume e' stata
-        # generata: e' quella, e non i nodi del volume, a definire il sistema
-        # di riferimento del modello (vedi abaqus.align_to_axes).
+        # `vertices` e' la superficie 06/08, non i nodi del volume, a definire
+        # il sistema di riferimento del modello (vedi abaqus.align_to_axes).
+        # Non quella preparata dallo step 9 (pulita o avvolta): la ripresa dal
+        # 10/11 ritrova solo 06/08, e la stessa configurazione deve dare lo
+        # stesso deck in corsa unica e in ripresa.
         metrics["11_export"] = abaqus.export_model(
             out / DECK_FILENAME,
             out / WALL_VTU_FILENAME,

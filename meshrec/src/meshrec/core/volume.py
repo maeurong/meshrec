@@ -65,7 +65,7 @@ class InvertedElementsError(ValueError):
 TETGEN_A_ABAQUS = (0, 1, 2, 3, 6, 7, 9, 5, 8, 4)
 
 
-def _diagnosi_del_guasto(messaggio: str, nobisect: bool) -> str:
+def _diagnosi_del_guasto(messaggio: str, nobisect: bool, wrap_acceso: bool) -> str:
     """Il rimedio giusto per il punto interno in cui TetGen si e' fermato.
 
     Fino al 30/08/2026 il rimedio era uno solo -- «alza min_ratio» -- e su
@@ -95,14 +95,29 @@ def _diagnosi_del_guasto(messaggio: str, nobisect: bool) -> str:
     Fuori da quei due casi resta il rimedio generico: **una diagnosi sbagliata
     costa piu' di nessuna diagnosi**, ed e' il difetto che questa funzione
     corregge. Ripeterlo al contrario non sarebbe un progresso.
+
+    Col wrap gia' acceso la superficie rifiutata e' gia' l'alpha wrap:
+    proporlo come ripiego manderebbe a cercare dove si e' gia' cercato.
     """
+    if "recoversubface" in messaggio and wrap_acceso:
+        return (
+            "il guasto è nel recupero delle facce di ingresso, prima "
+            "che il raffinamento cominciasse, e la superficie è già l'alpha wrap: "
+            "ha ancora geometria che TetGen non recupera. Prova ad abbassare "
+            "tet.wrap_tolerance: un alpha più piccolo segue la superficie più da "
+            "vicino (più triangoli, più tempo)."
+        )
     if "recoversubface" in messaggio:
         return (
             "il guasto è nel recupero delle facce di ingresso, prima "
             "che il raffinamento cominciasse: il vincolo raggio-spigolo non è "
-            "ancora entrato in gioco e cambiarlo non sposta nulla. La causa "
-            "tipica sono le autointersezioni della superficie, e il rimedio sta "
-            "a monte, negli step 6 e 8."
+            "ancora entrato in gioco e cambiarlo non sposta nulla. Le cause sono "
+            "le autointersezioni della superficie, che lo step 9 conta e pulisce "
+            "prima di arrivare qui, oppure geometria quasi degenere che TetGen non "
+            "recupera anche senza autointersezioni (pieghe, segmenti quasi "
+            "sovrapposti). Il ripiego è tet.wrap_tolerance: la superficie viene "
+            "sostituita da un alpha wrap, con il volume gonfiato dell'offset e le "
+            "cavità più strette della tolleranza perse."
         )
     if "split_subface" in messaggio and not nobisect:
         return (
@@ -121,32 +136,12 @@ def _diagnosi_del_guasto(messaggio: str, nobisect: bool) -> str:
     )
 
 
-def tetrahedralize(
-    vertices: np.ndarray,
-    faces: np.ndarray,
-    max_volume: float | None = None,
-    *,
-    min_ratio: float,
-    max_steiner_points: int,
-    nobisect: bool,
-    order: int = 1,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Riempie di tetraedri lineari la superficie chiusa data.
+def verifica_superficie_pronta(faces: np.ndarray) -> None:
+    """Superficie vuota o non chiusa: solleva prima che TetGen o il wrap la vedano.
 
-    `min_ratio` e il rapporto raggio-spigolo massimo ammesso (piu basso =
-    elementi piu regolari e piu numerosi); `max_volume` limita il volume del
-    singolo elemento nelle unita di lavoro; `max_steiner_points` limita i punti
-    che TetGen puo' aggiungere per raffinare, e -1 toglie il limite. `nobisect`
-    vieta la suddivisione delle facce di ingresso: la superficie esce identica a
-    come e' entrata, e il raffinamento resta confinato all'interno.
-
-    Ne' `min_ratio`, ne' `max_steiner_points`, ne' `nobisect` hanno un valore predefinito qui,
-    apposta: l'unico luogo dove un parametro di elaborazione ha un predefinito
-    e' `core.config`. Il predefinito ereditato dalla libreria tetgen per
-    `max_steiner_points` (100000) ha prodotto mesh troncate senza che nulla lo
-    segnalasse; il predefinito 1.1 che questa firma portava per `min_ratio`
-    contraddiceva il predefinito 1.8 di `TetConfig` ed era il valore che sul
-    muro reale non porta a termine il raffinamento.
+    Estratta da `tetrahedralize` perche' `autointersezioni.prepara_ingresso`
+    deve applicare lo stesso controllo, con lo stesso testo, prima del proprio
+    wrap (specs/2026-09-21-autointersezioni-e-wrap-design.md:111-112).
     """
     faces = np.asarray(faces)
     # La mesh vuota prima di quella aperta: da quando `is_watertight` rende
@@ -167,6 +162,38 @@ def tetrahedralize(
             "TetGen richiede un ingresso manifold chiuso; ripara la superficie "
             "con core.repair.repair_surface prima di tetraedrizzare."
         )
+
+
+def tetrahedralize(
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    max_volume: float | None = None,
+    *,
+    min_ratio: float,
+    max_steiner_points: int,
+    nobisect: bool,
+    order: int = 1,
+    wrap_acceso: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Riempie di tetraedri lineari la superficie chiusa data.
+
+    `min_ratio` e il rapporto raggio-spigolo massimo ammesso (piu basso =
+    elementi piu regolari e piu numerosi); `max_volume` limita il volume del
+    singolo elemento nelle unita di lavoro; `max_steiner_points` limita i punti
+    che TetGen puo' aggiungere per raffinare, e -1 toglie il limite. `nobisect`
+    vieta la suddivisione delle facce di ingresso: la superficie esce identica a
+    come e' entrata, e il raffinamento resta confinato all'interno.
+
+    Ne' `min_ratio`, ne' `max_steiner_points`, ne' `nobisect` hanno un valore predefinito qui,
+    apposta: l'unico luogo dove un parametro di elaborazione ha un predefinito
+    e' `core.config`. Il predefinito ereditato dalla libreria tetgen per
+    `max_steiner_points` (100000) ha prodotto mesh troncate senza che nulla lo
+    segnalasse; il predefinito 1.1 che questa firma portava per `min_ratio`
+    contraddiceva il predefinito 1.8 di `TetConfig` ed era il valore che sul
+    muro reale non porta a termine il raffinamento.
+    """
+    faces = np.asarray(faces)
+    verifica_superficie_pronta(faces)
 
     generator = tetgen.TetGen(
         np.ascontiguousarray(vertices, dtype=np.float64),
@@ -198,7 +225,7 @@ def tetrahedralize(
         # TetGen si e' fermato e sceglie il consiglio di conseguenza.
         raise RefinementFailedError(
             f"TetGen si è interrotto con min_ratio={min_ratio}: "
-            f"{_diagnosi_del_guasto(str(errore), nobisect)} "
+            f"{_diagnosi_del_guasto(str(errore), nobisect, wrap_acceso)} "
             f"Errore originale di TetGen: {errore}"
         ) from errore
     tets = np.asarray(tets, dtype=np.int64)
@@ -226,6 +253,7 @@ def tetrahedralize_with_metrics(
         # chi lo sceglie e' `TetConfig.element`. Tenerne due sarebbe tenere due
         # verita' sullo stesso fatto, con il rischio che si contraddicano.
         order=2 if cfg.element == "C3D10" else 1,
+        wrap_acceso=cfg.wrap_tolerance is not None,
     )
     seconds = time.perf_counter() - start
 

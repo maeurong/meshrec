@@ -1,0 +1,2 @@
+{"derived_from": {"path": "https://raw.githubusercontent.com/libigl/libigl/HEAD/include/igl/copyleft/cgal/outer_hull.h", "sha256": "c592e15e6b2cfc98c9ad011511d40c1b22e5a10d9e95c6ea2e196f2f043d2443", "bytes": 1661},
+ "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}

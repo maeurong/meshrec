@@ -1,0 +1,338 @@
+import numpy as np
+import open3d as o3d
+import pytest
+
+from meshrec.core import autointersezioni as ai
+from meshrec.core import config, volume
+
+
+def _sfera(polo: tuple[float, float, float] | None = None, resolution: int = 20):
+    """Sfera di raggio 50 mm; `polo` sposta il vertice piu' alto.
+
+    Con polo a (0, 0, -70) il vertice attraversa la calotta opposta: 80 facce
+    autointersecanti su 1520, misurato il 21/09/2026. Due cubi compenetrati NON
+    servono: MeshFix li riduce a 7 vertici dichiarando successo.
+    """
+    sfera = o3d.geometry.TriangleMesh.create_sphere(radius=50.0, resolution=resolution)
+    v = np.asarray(sfera.vertices).copy()
+    f = np.asarray(sfera.triangles).astype(np.int64)
+    if polo is not None:
+        v[int(np.argmax(v[:, 2]))] = polo
+    return v, f
+
+
+def test_la_sfera_pulita_non_ha_autointersezioni():
+    assert ai.conta_autointersezioni(*_sfera()) == 0
+
+
+def test_il_polo_passante_si_conta():
+    assert ai.conta_autointersezioni(*_sfera((0.0, 0.0, -70.0))) == 80
+
+
+def test_la_superficie_vuota_non_ha_autointersezioni():
+    assert ai.conta_autointersezioni(np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64)) == 0
+
+
+def test_meshfix_toglie_il_polo_passante_e_lo_dichiara():
+    v, f, convergito = ai.pulisci_autointersezioni(*_sfera((0.0, 0.0, -70.0)))
+    assert convergito is True
+    assert ai.conta_autointersezioni(v, f) == 0
+    assert len(f) > 1400  # non ha svuotato la sfera
+
+
+def test_il_wrap_della_sfera_pulita_sposta_quanto_l_offset():
+    v, f = _sfera()
+    wv, wf, misure = ai.avvolgi(v, f, 5.0)
+    assert len(wf) > 0
+    assert misure["wrap_alpha_mm"] == pytest.approx(5.0)
+    assert misure["wrap_offset_mm"] == pytest.approx(0.5)
+    assert ai.spostamento(v, f, wv, wf)["max"] == pytest.approx(0.5, abs=0.05)
+
+
+def test_il_wrap_rifiuta_superficie_vuota_e_tolleranza_non_positiva():
+    with pytest.raises(ValueError, match="senza facce"):
+        ai.avvolgi(np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), 5.0)
+    with pytest.raises(ValueError, match="tolleranza"):
+        ai.avvolgi(*_sfera(), 0.0)
+
+
+def test_due_superfici_identiche_non_si_spostano():
+    v, f = _sfera()
+    assert ai.spostamento(v, f, v, f)["max"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_spostamento_e_deterministico():
+    """`get_hausdorff_distance` di PyMeshLab (commit 64b6220, prima del fix
+    round 2) non era deterministico nemmeno su campioni fissi: jitter interno
+    alla libreria, non al campionamento (verificato in sessione, 21/09/2026).
+    `spostamento` ora misura con `scipy.spatial.cKDTree`: stessi ingressi,
+    stesso dict, byte per byte."""
+    v, f = _sfera((0.0, 0.0, -70.0))
+    wv, wf, _ = ai.avvolgi(v, f, 5.0)
+    assert ai.spostamento(v, f, wv, wf) == ai.spostamento(v, f, wv, wf)
+
+
+def test_spostamento_non_sottostima_il_polo_passante():
+    """Il campionamento Montecarlo di PyMeshLab (commit 64b6220, prima del fix
+    round 2) aveva trovato punti fino a 30,38 mm su questa stessa coppia (9
+    chiamate, 21/09/2026: 29,39-30,38). Lo spostamento vero e' quindi
+    >= 30,38 mm: un campionamento fisso troppo rado (solo
+    vertici+baricentri+punti medi, ~21 mm) lo mancherebbe, e la tolleranza
+    deve essere un limite vero, non un'indicazione. `passo_mm` qui e' lo
+    stesso tol/5 che usa `prepara_ingresso` (vedi il suo commento: misurato
+    30,82 mm, sopra soglia)."""
+    v, f = _sfera((0.0, 0.0, -70.0))
+    wv, wf, _ = ai.avvolgi(v, f, 5.0)
+    assert ai.spostamento(v, f, wv, wf, passo_mm=5.0 / 5.0)["max"] >= 30.38
+
+
+# Le due righe segnalate dall'architect come scoperte dallo Step 1.
+
+
+def test_pulisci_sfera_pulita_rende_stesso_conteggio_e_true():
+    v, f = _sfera()
+    nv, nf, convergito = ai.pulisci_autointersezioni(v, f)
+    assert convergito is True
+    assert len(nf) == len(f)
+
+
+def test_il_wrap_vuoto_solleva_anche_con_facce_valide(monkeypatch):
+    """Wrap che esce senza facce: mesh_set finto, non una geometria cercata a mano."""
+
+    class _MeshSetVuoto:
+        def current_mesh(self):
+            return self
+
+        def bounding_box(self):
+            return self
+
+        def diagonal(self):
+            return 100.0
+
+        def apply_filter(self, *a, **k):
+            pass
+
+        def vertex_matrix(self):
+            return np.zeros((0, 3))
+
+        def face_matrix(self):
+            return np.zeros((0, 3), dtype=np.int64)
+
+    monkeypatch.setattr(ai, "_mesh_set", lambda vertices, faces: _MeshSetVuoto())
+    with pytest.raises(ValueError, match="non ha prodotto facce"):
+        ai.avvolgi(*_sfera(), 5.0)
+
+
+# Riga «facce int64 e int32 → stesso conteggio» del contratto ingressi: nessuno
+# dei 9 test sopra confronta i due dtype, la aggiungo qui.
+
+
+def test_conteggio_uguale_fra_facce_int64_e_int32():
+    v, f = _sfera((0.0, 0.0, -70.0))
+    assert ai.conta_autointersezioni(v, f.astype(np.int64)) == ai.conta_autointersezioni(
+        v, f.astype(np.int32)
+    )
+
+
+# prepara_ingresso (Task 3): dal brief, verbatim.
+
+
+def test_superficie_pulita_passa_intatta():
+    v, f = _sfera()
+    ov, of, misure, cambiata = ai.prepara_ingresso(v, f, config.TetConfig(), step_8_acceso=False)
+    assert cambiata is False
+    assert of is f or np.array_equal(of, f)
+    assert misure["self_intersections_before"] == 0
+    assert misure["meshfix_clean_converged"] is None
+    assert misure["wrap_applied"] is False
+
+
+def test_il_polo_passante_viene_pulito_e_registrato():
+    v, f = _sfera((0.0, 0.0, -70.0))
+    _, of, misure, cambiata = ai.prepara_ingresso(v, f, config.TetConfig(), step_8_acceso=False)
+    assert cambiata is True
+    assert misure["self_intersections_before"] == 80
+    assert misure["self_intersections_after"] == 0
+    assert misure["meshfix_clean_converged"] is True
+    assert misure["triangles_removed_by_clean"] == len(f) - len(of)
+
+
+def test_una_pulizia_che_non_converge_ferma_lo_step(monkeypatch):
+    v, f = _sfera((0.0, 0.0, -70.0))
+    monkeypatch.setattr(ai, "pulisci_autointersezioni", lambda v, f: (v, f, False))
+    with pytest.raises(ai.AutointersezioniResidueError) as caduta:
+        ai.prepara_ingresso(v, f, config.TetConfig(), step_8_acceso=True)
+    messaggio = str(caduta.value)
+    assert "80" in messaggio
+    assert "step 8" in messaggio
+    assert "tet.wrap_tolerance" in messaggio
+    # I numeri di una prova non sono quelli della corsa dell'utente.
+    assert "646" not in messaggio and "7747" not in messaggio
+
+
+def test_convergenza_non_dichiarata_con_zero_residue_non_dice_zero_restano(monkeypatch):
+    conteggi = iter([80, 0])
+    monkeypatch.setattr(ai, "conta_autointersezioni", lambda *a: next(conteggi))
+    monkeypatch.setattr(ai, "pulisci_autointersezioni", lambda v, f: (v, f, False))
+    with pytest.raises(ai.AutointersezioniResidueError) as caduta:
+        ai.prepara_ingresso(*_sfera(), config.TetConfig(), step_8_acceso=False)
+    messaggio = str(caduta.value)
+    assert "0 facce autointersecanti restano" not in messaggio
+    assert "convergenza" in messaggio
+
+
+def test_il_wrap_oltre_la_tolleranza_registra_lo_spostamento_e_non_ferma():
+    """Tolleranza dichiarativa (decisione di Mario, 21/09/2026): sul caso reale
+    il massimo viene dalle cavita' piu' strette di alpha, che il wrap chiude
+    per costruzione, e col limite lo step falliva a ogni valore.
+
+    28,0 e non 30,38 (il massimo del Montecarlo su questa coppia): qui il
+    passo lo sceglie `prepara_ingresso`, ed e' lo spigolo mediano (7,85 mm
+    su questa sfera grossolana), che misura 28,76. Una sottostima di qualche
+    % non fa passare nulla di nascosto, la tolleranza non ferma piu'. Il
+    30,38 resta nel test di `spostamento` a passo esplicito."""
+    v, f = _sfera((0.0, 0.0, -70.0))
+    _, _, misure, cambiata = ai.prepara_ingresso(
+        v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False
+    )
+    assert cambiata is True
+    assert misure["wrap_hausdorff_max_mm"] >= 28.0
+    assert misure["wrap_hausdorff_mean_mm"] <= misure["wrap_hausdorff_p95_mm"] <= misure["wrap_hausdorff_max_mm"]
+
+
+def test_il_wrap_di_una_superficie_senza_ingombro_e_un_valueerror_leggibile():
+    """Tutti i vertici coincidenti: la diagonale e' 0 e la percentuale di
+    PyMeshLab sarebbe una divisione per zero, non un messaggio."""
+    v = np.zeros((4, 3))
+    f = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]], dtype=np.int64)
+    with pytest.raises(ValueError, match="diagonale"):
+        ai.prepara_ingresso(v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False)
+
+
+def test_una_tolleranza_minuscola_non_fa_esplodere_la_misura(monkeypatch):
+    """Il passo e' tol/5 ma mai sotto lo spigolo mediano dell'ingresso: con
+    tol 1e-6 il passo tol/5 chiederebbe ~500 000 punti per faccia (tetto
+    1000 suddivisioni), centinaia di milioni sulla sfera."""
+    import time
+
+    v, f = _sfera()
+    lati = np.linalg.norm(v[f] - v[np.roll(f, 1, axis=1)], axis=2)
+    monkeypatch.setattr(ai, "avvolgi", lambda v, f, tol: (v, f, {"wrap_alpha_mm": tol}))
+    vero = ai.spostamento
+
+    def controllato(*args, passo_mm):
+        assert passo_mm >= float(np.median(lati))
+        return vero(*args, passo_mm=passo_mm)
+
+    monkeypatch.setattr(ai, "spostamento", controllato)
+    avvio = time.perf_counter()
+    _, _, misure, _ = ai.prepara_ingresso(
+        v, f, config.TetConfig(wrap_tolerance=1e-6), step_8_acceso=False
+    )
+    assert time.perf_counter() - avvio < 30.0
+    assert misure["wrap_hausdorff_max_mm"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_il_wrap_entro_tolleranza_sostituisce_e_dichiara(monkeypatch):
+    chiamate = []
+    monkeypatch.setattr(ai, "pulisci_autointersezioni", lambda *a: chiamate.append(a))
+    v, f = _sfera()
+    _, _, misure, cambiata = ai.prepara_ingresso(
+        v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False
+    )
+    assert cambiata is True and chiamate == []
+    assert misure["wrap_applied"] is True
+    assert misure["wrap_hausdorff_max_mm"] == pytest.approx(0.5, abs=0.05)
+    assert misure["wrap_volume_after"] > misure["wrap_volume_before"]
+    assert misure["wrap_note"] == "superficie sostituita, non riparata"
+    assert misure["meshfix_clean_converged"] is None
+
+
+# Le 4 righe aggiunte dall'architect al contratto ingressi: nessun test sopra
+# le copre (superficie non chiusa, superficie vuota col wrap acceso, residue
+# del wrap che non fermano, e l'ordine dei due controlli col wrap spento).
+
+
+def test_superficie_aperta_ferma_prima_del_wrap():
+    v, f = _sfera()
+    f_aperta = f[1:]  # una faccia tolta: bordo aperto
+    with pytest.raises(volume.NotWatertightError):
+        ai.prepara_ingresso(v, f_aperta, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False)
+
+
+def test_superficie_senza_facce_wrap_acceso_da_notwatertight_non_valueerror():
+    v = np.zeros((0, 3))
+    f = np.zeros((0, 3), dtype=np.int64)
+    with pytest.raises(volume.NotWatertightError, match="senza facce"):
+        ai.prepara_ingresso(v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False)
+
+
+def test_wrap_con_residue_le_registra_senza_fermare_lo_step(monkeypatch):
+    monkeypatch.setattr(ai, "conta_autointersezioni", lambda *a: 3)
+    v, f = _sfera()
+    _, _, misure, cambiata = ai.prepara_ingresso(
+        v, f, config.TetConfig(wrap_tolerance=5.0), step_8_acceso=False
+    )
+    assert cambiata is True
+    assert misure["wrap_applied"] is True
+    assert misure["self_intersections_after"] == 3
+
+
+def test_wrap_spento_superficie_aperta_con_autointersezioni_da_notwatertight():
+    v, f = _sfera((0.0, 0.0, -70.0))
+    f_aperta = f[1:]  # bordo aperto, oltre al polo passante
+    with pytest.raises(volume.NotWatertightError):
+        ai.prepara_ingresso(v, f_aperta, config.TetConfig(), step_8_acceso=False)
+
+
+# Fix round 3: i campioni di spostamento a lotti (finding b, round 2). Round 2
+# costruiva tutti i campioni in un colpo solo (`np.vstack`); su una mesh reale
+# (1-4 M facce, spigoli 10-20 mm, passo tol/5) sono centinaia di milioni di
+# punti, OOM.
+
+
+def test_spostamento_con_facce_enormi_e_passo_piccolo_non_esplode():
+    """Esempio del finding: 2 triangoli da 1000 mm di spigolo, passo 0,1 —
+    senza il tetto e senza lotti, miliardi di punti. Qui deve solo finire,
+    in fretta, senza MemoryError."""
+    v = np.array(
+        [[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [1000.0, 1000.0, 0.0], [0.0, 1000.0, 0.0]]
+    )
+    f = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
+    risultato = ai.spostamento(v, f, v, f, passo_mm=0.1)
+    assert risultato["max"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_i_lotti_di_campioni_restano_sotto_il_budget_anche_su_molte_facce():
+    """La mesh reale del finding ha 1-4 M facce uniformi (10-20 mm), non
+    poche facce enormi: e' il totale che esplode, non una singola faccia.
+    Qui una sfera con tante facce piccole e un passo che le costringe a piu'
+    di un lotto: ogni lotto deve restare sotto il budget, il totale no —
+    e' la prova che il picco di memoria dipende dal lotto."""
+    v, f = _sfera(resolution=80)
+    lotti = list(ai._lotti_di_campioni(v, f, 0.3))
+    assert len(lotti) > 1
+    assert sum(len(lotto) for lotto in lotti) > ai._PUNTI_PER_LOTTO_CAMPIONI
+    for lotto in lotti:
+        assert len(lotto) <= ai._PUNTI_PER_LOTTO_CAMPIONI
+
+
+def test_spostamento_e_indipendente_dalla_dimensione_del_lotto(monkeypatch):
+    """Una faccia o un lotto parziale finale non deve cambiare il risultato:
+    stessa mesh, lotto piu' piccolo. I massimi identici; le medie a meno
+    dell'ultimo bit, perche' la somma e' esatta per lotto, non fra lotti."""
+    v, f = _sfera((0.0, 0.0, -70.0))
+    wv, wf, _ = ai.avvolgi(v, f, 5.0)
+    con_lotto_grande = ai.spostamento(v, f, wv, wf, passo_mm=1.0)
+    monkeypatch.setattr(ai, "_PUNTI_PER_LOTTO_CAMPIONI", 500)
+    con_lotto_piccolo = ai.spostamento(v, f, wv, wf, passo_mm=1.0)
+    for chiave in ("max_a_verso_b", "max_b_verso_a", "max"):
+        assert con_lotto_grande[chiave] == con_lotto_piccolo[chiave]
+    assert con_lotto_grande["mean"] == pytest.approx(con_lotto_piccolo["mean"], rel=1e-12)
+
+
+def test_nessun_campione_da_media_zero():
+    v, f = _sfera()
+    vuoti_v, vuoti_f = np.empty((0, 3)), np.empty((0, 3), dtype=np.int64)
+    massimo, media, distanze = ai._distanza_massima_e_media(vuoti_v, vuoti_f, 1.0, v, f)
+    assert (massimo, media, len(distanze)) == (0.0, 0.0, 0)

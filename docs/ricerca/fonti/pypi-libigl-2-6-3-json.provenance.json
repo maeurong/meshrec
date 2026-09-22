@@ -1,0 +1,2 @@
+{"derived_from": {"path": "https://pypi.org/pypi/libigl/2.6.3/json", "sha256": "8b8820becd736d7c09037bcf57507cb23549a5016ff77da160bddbbc04d17247", "bytes": 26565},
+ "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}

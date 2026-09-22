@@ -90,6 +90,13 @@ BLOCCHI_FUORI_IMPRONTA: tuple[str, ...] = ("run", "wall", "model")
 # `step_fingerprints` sarebbe un'altra decisione.
 BLOCCHI_VUOTI_FUORI_IMPRONTA: tuple[str, ...] = ("regioni",)
 
+# Campi aggiunti dopo che i registri d'esperimento erano stati scritti: finche'
+# valgono None non cambiano l'elaborazione, e metterli nel dump scollegherebbe
+# le 22 righe gia' registrate (tests/test_config.py). Stessa regola di
+# BLOCCHI_VUOTI_FUORI_IMPRONTA, un livello piu' giu'. Come quella, vale per
+# l'impronta di candidato e non per la catena degli step.
+CAMPI_NULLI_FUORI_IMPRONTA: tuple[tuple[str, str], ...] = (("tet", "wrap_tolerance"),)
+
 
 def fingerprint(cfg: PipelineConfig) -> str:
     """Sha256 della configurazione canonica, esclusi i blocchi che non contano.
@@ -109,6 +116,9 @@ def fingerprint(cfg: PipelineConfig) -> str:
     for blocco in BLOCCHI_VUOTI_FUORI_IMPRONTA:
         if not any((payload.get(blocco) or {}).values()):
             payload.pop(blocco, None)
+    for blocco, campo in CAMPI_NULLI_FUORI_IMPRONTA:
+        if (payload.get(blocco) or {}).get(campo, 0) is None:
+            payload[blocco].pop(campo)
     canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

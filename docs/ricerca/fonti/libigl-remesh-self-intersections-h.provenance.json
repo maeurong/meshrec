@@ -1,0 +1,2 @@
+{"derived_from": {"path": "https://raw.githubusercontent.com/libigl/libigl/HEAD/include/igl/copyleft/cgal/remesh_self_intersections.h", "sha256": "d997ed1a585b0c7baa3e5d3890fcf14f3567aebfd943eb181628b318aef31891", "bytes": 4018},
+ "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}

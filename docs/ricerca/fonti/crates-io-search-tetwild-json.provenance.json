@@ -1,0 +1,1 @@
+{"derived_from": {"path": "https://crates.io/api/v1/crates?q=tetwild", "sha256": "d7387f5dcd24fdc0d26627015f545d5af97cdb03e877a77bc41ab9e0514ef98c", "bytes": 66}, "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}

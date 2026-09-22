@@ -48,6 +48,33 @@ const SUPERFICIE = {
   "aspect_ratio · non_finite": "triangoli con aspetto non misurabile",
 };
 
+// Lo scarto dalla nuvola: lo step 7 lo misura, il 9 lo rimisura quando la
+// superficie cambia. Stesse chiavi, stesse etichette, una sola copia.
+const SCARTO = {
+  "geometric_error · hausdorff": "scarto di Hausdorff [mm]",
+  // I due versi non sono la stessa misura e non danno lo stesso numero: nel
+  // verso dalla nuvola alla superficie i campioni sono i punti della nuvola
+  // contro le facce, nell'altro sono i soli vertici contro la nuvola. Sono
+  // 4,897 mm contro 3,898 su lab_crop, e una tabella che li chiamasse
+  // entrambi «scarto» lascerebbe scegliere il piu' comodo.
+  "geometric_error · cloud_to_mesh · min": "scarto dalla nuvola alla superficie, minimo [mm]",
+  "geometric_error · cloud_to_mesh · mean": "scarto dalla nuvola alla superficie, medio [mm]",
+  "geometric_error · cloud_to_mesh · max": "scarto dalla nuvola alla superficie, massimo [mm]",
+  "geometric_error · cloud_to_mesh · RMS": "scarto dalla nuvola alla superficie, RMS [mm]",
+  "geometric_error · cloud_to_mesh · n_samples": "campioni dalla nuvola alla superficie",
+  "geometric_error · mesh_to_cloud · min": "scarto dalla superficie alla nuvola, minimo [mm]",
+  "geometric_error · mesh_to_cloud · mean": "scarto dalla superficie alla nuvola, medio [mm]",
+  "geometric_error · mesh_to_cloud · max": "scarto dalla superficie alla nuvola, massimo [mm]",
+  "geometric_error · mesh_to_cloud · RMS": "scarto dalla superficie alla nuvola, RMS [mm]",
+  "geometric_error · mesh_to_cloud · n_samples": "campioni dalla superficie alla nuvola",
+  // Le diagonali dei due ingombri: le scrive PyMeshLab dentro lo stesso
+  // dizionario, e sono la scala rispetto a cui il suo scarto si legge.
+  "geometric_error · cloud_to_mesh · diag_mesh_0": "diagonale d'ingombro della superficie [mm]",
+  "geometric_error · cloud_to_mesh · diag_mesh_1": "diagonale d'ingombro della nuvola [mm]",
+  "geometric_error · mesh_to_cloud · diag_mesh_0": "diagonale d'ingombro della superficie [mm]",
+  "geometric_error · mesh_to_cloud · diag_mesh_1": "diagonale d'ingombro della nuvola [mm]",
+};
+
 export const ETICHETTE_METRICHE = {
   "01_load": {
     "points_read": "punti letti",
@@ -107,28 +134,7 @@ export const ETICHETTE_METRICHE = {
   },
   "07_surface_quality": {
     ...SUPERFICIE,
-    "geometric_error · hausdorff": "scarto di Hausdorff [mm]",
-    // I due versi non sono la stessa misura e non danno lo stesso numero: nel
-    // verso dalla nuvola alla superficie i campioni sono i punti della nuvola
-    // contro le facce, nell'altro sono i soli vertici contro la nuvola. Sono
-    // 4,897 mm contro 3,898 su lab_crop, e una tabella che li chiamasse
-    // entrambi «scarto» lascerebbe scegliere il piu' comodo.
-    "geometric_error · cloud_to_mesh · min": "scarto dalla nuvola alla superficie, minimo [mm]",
-    "geometric_error · cloud_to_mesh · mean": "scarto dalla nuvola alla superficie, medio [mm]",
-    "geometric_error · cloud_to_mesh · max": "scarto dalla nuvola alla superficie, massimo [mm]",
-    "geometric_error · cloud_to_mesh · RMS": "scarto dalla nuvola alla superficie, RMS [mm]",
-    "geometric_error · cloud_to_mesh · n_samples": "campioni dalla nuvola alla superficie",
-    "geometric_error · mesh_to_cloud · min": "scarto dalla superficie alla nuvola, minimo [mm]",
-    "geometric_error · mesh_to_cloud · mean": "scarto dalla superficie alla nuvola, medio [mm]",
-    "geometric_error · mesh_to_cloud · max": "scarto dalla superficie alla nuvola, massimo [mm]",
-    "geometric_error · mesh_to_cloud · RMS": "scarto dalla superficie alla nuvola, RMS [mm]",
-    "geometric_error · mesh_to_cloud · n_samples": "campioni dalla superficie alla nuvola",
-    // Le diagonali dei due ingombri: le scrive PyMeshLab dentro lo stesso
-    // dizionario, e sono la scala rispetto a cui il suo scarto si legge.
-    "geometric_error · cloud_to_mesh · diag_mesh_0": "diagonale d'ingombro della superficie [mm]",
-    "geometric_error · cloud_to_mesh · diag_mesh_1": "diagonale d'ingombro della nuvola [mm]",
-    "geometric_error · mesh_to_cloud · diag_mesh_0": "diagonale d'ingombro della superficie [mm]",
-    "geometric_error · mesh_to_cloud · diag_mesh_1": "diagonale d'ingombro della nuvola [mm]",
+    ...SCARTO,
   },
   "08_simplify": {
     "enabled": "abilitata",
@@ -151,6 +157,25 @@ export const ETICHETTE_METRICHE = {
     "max_volume": "volume massimo chiesto [mm³]",
     "nobisect": "senza bisezione",
     "seconds": "durata [s]",
+    "self_intersections_before": "facce autointersecanti in ingresso",
+    "self_intersections_after": "facce autointersecanti consegnate a TetGen",
+    "meshfix_clean_converged": "convergenza dichiarata da MeshFix",
+    "triangles_removed_by_clean": "triangoli tolti dalla pulizia",
+    "wrap_applied": "superficie sostituita dall'alpha wrap",
+    "wrap_alpha_mm": "alpha del wrap [mm]",
+    "wrap_offset_mm": "offset del wrap [mm]",
+    // Lo spostamento si registra e non ferma lo step: il massimo viene dalle
+    // cavita' piu' strette di alpha, che il wrap chiude per costruzione.
+    "wrap_hausdorff_max_mm": "spostamento del wrap, massimo [mm]",
+    "wrap_hausdorff_mean_mm": "spostamento del wrap, medio [mm]",
+    "wrap_hausdorff_p95_mm": "spostamento del wrap, 95º percentile [mm]",
+    "wrap_volume_before": "volume prima del wrap [mm³]",
+    "wrap_volume_after": "volume dopo il wrap [mm³]",
+    "wrap_seconds": "durata del wrap [s]",
+    "wrap_note": "nota sul wrap",
+    // Stesse grandezze dello step 7, rimisurate sulla superficie che TetGen
+    // ha riempito quando lo step 8 o la preparazione l'hanno cambiata.
+    ...SCARTO,
   },
   "10_volume_quality": {
     "nodes": "nodi",

@@ -1,0 +1,2 @@
+{"derived_from": {"path": "https://pypi.org/pypi/pymeshfix/0.18.1/json", "sha256": "b84c681d2f21b65c9c16b21615fb09b5495ef811b0f6416eeee05781771a3b26", "bytes": 21724},
+ "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}

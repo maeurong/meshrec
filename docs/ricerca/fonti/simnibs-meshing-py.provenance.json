@@ -1,0 +1,2 @@
+{"derived_from": {"path": "https://raw.githubusercontent.com/simnibs/simnibs/HEAD/simnibs/mesh_tools/meshing.py", "sha256": "0e2a26e657fd29f166f56a89746f0dd6db840415edc51a80f1d568a2fa883b46", "bytes": 96445},
+ "tool": "curl", "tool_version": "8.7.1", "extracted": "2026-09-21"}

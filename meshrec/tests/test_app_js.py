@@ -6744,6 +6744,40 @@ for (const chiave of ["05_reconstruct", "06_repair", "08_simplify"]) {{
 """)
 
 
+def test_le_misure_della_preparazione_dello_step_9_hanno_la_loro_etichetta():
+    """`autointersezioni.prepara_ingresso` aggiunge allo step 9 le misure del
+    controllo e del wrap, e lo step 9 rimisura `geometric_error` quando la
+    superficie cambia: senza etichetta il pannello stampava la chiave grezza.
+    Come il banco delle due tabelle di qualita', le chiavi vengono dalle
+    funzioni vere, non da un elenco scritto a mano."""
+    import numpy as np
+    import open3d as o3d
+
+    from meshrec.core import autointersezioni, config, quality
+
+    sfera = o3d.geometry.TriangleMesh.create_sphere(radius=50.0, resolution=10)
+    vertici = np.asarray(sfera.vertices)
+    facce = np.asarray(sfera.triangles).astype(np.int64)
+    _, _, misure, _ = autointersezioni.prepara_ingresso(
+        vertici, facce, config.TetConfig(wrap_tolerance=10.0), step_8_acceso=False
+    )
+    misure["geometric_error"] = quality.geometric_error(vertici, facce, vertici)
+
+    def appiattite(dizionario: dict, prefisso: str = "") -> list[str]:
+        chiavi = []
+        for nome, valore in dizionario.items():
+            intero = f"{prefisso}{nome}"
+            if isinstance(valore, dict) and valore:
+                chiavi += appiattite(valore, f"{intero} · ")
+            else:
+                chiavi.append(intero)
+        return chiavi
+
+    etichette = _etichette_metriche()["09_tetrahedralize"]
+    mancanti = [c for c in appiattite(misure) if c not in etichette]
+    assert mancanti == [], f"09_tetrahedralize: chiavi nude a video: {mancanti}"
+
+
 def test_etichette_js_non_importa_niente():
     """`etichette.js` deve restare valutabile da solo con `node -e`: e' cosi'
     che `_etichette_metriche()` lo legge, senza un server che gli serva un

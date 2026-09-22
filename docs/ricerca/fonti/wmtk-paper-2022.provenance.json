@@ -1,0 +1,1 @@
+{"derived_from": {"path": "https://web.uvic.ca/~teseo/profile/publications/toolkit/2022-WildMeshingToolkit.pdf", "sha256": "c53a75d712b6821d9963c4b62700e37d93025c26be282c33f5db87b06da188f1", "bytes": 86925}, "tool": "curl 8.7.1 + pypdf", "tool_version": "6.19.0", "extracted": "2026-09-21"}
