@@ -13,7 +13,9 @@ con [versionamento semantico](https://semver.org/lang/it/).
   nuvola nelle metriche dello step 9.
 - `tet.wrap_tolerance` [mm], spento di predefinito: sostituisce la superficie con un alpha wrap
   di CGAL (alpha = tolleranza, offset = alpha/10) e registra lo spostamento fra le due superfici
-  (massimo, media, 95° percentile) senza fermare lo step. Su `geoandgeo-mm`, che senza wrap
+  (massimo, media, 95° percentile) senza fermare lo step: la distanza esatta di una griglia di
+  campioni dall'altra superficie, quindi il massimo può solo stare sotto il vero (#211). Su
+  `geoandgeo-mm`, che senza wrap
   si ferma in `recoversubfaces`, a 6,9 mm arriva al deck:
   - le facce autointersecanti passano da 7747 a 22;
   - il volume cresce del 2,9 %;

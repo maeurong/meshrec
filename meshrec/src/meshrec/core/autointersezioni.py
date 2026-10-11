@@ -163,15 +163,15 @@ def _lotti_di_campioni(vertices: np.ndarray, faces: np.ndarray, passo: float):
             yield griglia.reshape(-1, 3)
 
 
-# ponytail: k=8 candidati per centroide, non tutte le facce. Il tetto vero
-# non sono gli aghi isolati ma la disparita' di taglia fra triangoli vicini:
-# un triangolo grande col baricentro lontano, circondato da 12 piccoli, puo'
-# restare fuori dagli 8 piu' vicini anche se la sua superficie e' a 0 mm dal
-# punto (riprodotto in review: 0,99 mm invece di 0). La direzione dell'errore
-# e' fail-safe: sovrastima, mai sottostima lo spostamento registrato. Se
-# compaiono spostamenti gonfiati su mesh con taglie di triangolo molto
-# disomogenee, la via d'uscita e' `query_ball_point` sui centroidi (raggio, non k fisso)
-# al posto di questo k.
+# ponytail: distanza esatta (#211). Una faccia dista da p almeno
+# dist(p, centroide) - r_f, con r_f = max ||vertice - centroide|| (il raggio
+# circoscritto non va: e' centrato altrove ed esplode sui triangoli degeneri).
+# Il limite usa il r_f massimo della classe: una classe sotto 2 volte il r_f
+# mediano, poi una per ottava, ognuna col suo KDTree, cosi' un triangolo da
+# 149 mm non allarga la ricerca fra facce da 35 mm. Tetto: il tempo. k cresce
+# finche' copre i centroidi entro la distanza migliore + r_max: aghi fitti e
+# punti lontani lo portano verso tutte le facce della classe. Se pesa, un BVH
+# sulle facce.
 _CANDIDATI_PER_PUNTO = 8
 _LOTTO_PUNTI = 20_000
 
@@ -209,25 +209,39 @@ def _punto_piu_vicino_su_triangolo(p: np.ndarray, a: np.ndarray, b: np.ndarray, 
 def _distanza_punti_a_superficie(punti: np.ndarray, vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
     """Distanza minima, esatta, da ogni punto alla superficie continua (non ai suoi vertici).
 
-    Il candidato e' l'insieme delle `_CANDIDATI_PER_PUNTO` facce coi centroidi
-    piu' vicini (KDTree), poi la proiezione esatta sceglie il punto. A lotti,
-    cosi' il picco di memoria non dipende da quanti punti misuriamo insieme.
+    Per classe di taglia: le k facce coi centroidi piu' vicini (KDTree), la
+    proiezione esatta su quelle, e k cresce per i soli punti in cui la
+    distanza dal k-esimo centroide, meno il r_max della classe, sta ancora
+    sotto la distanza migliore. A blocchi di al piu' `_LOTTO_PUNTI *
+    _CANDIDATI_PER_PUNTO` coppie punto-faccia: k raddoppia, ma non piu' di un
+    blocco per giro, cosi' il picco di memoria non dipende ne' dai punti ne' da k.
     """
     from scipy.spatial import cKDTree
 
+    if len(faces) == 0:
+        raise ValueError("superficie senza facce: nessuna distanza da misurare")
     a = vertices[faces[:, 0]]
     b = vertices[faces[:, 1]]
     c = vertices[faces[:, 2]]
-    albero = cKDTree((a + b + c) / 3.0)
-    k = min(_CANDIDATI_PER_PUNTO, len(faces))
-    distanze = np.empty(len(punti))
-    for i in range(0, len(punti), _LOTTO_PUNTI):
-        lotto = punti[i : i + _LOTTO_PUNTI]
-        _, idx = albero.query(lotto, k=k)
-        if k == 1:
-            idx = idx[:, None]
-        d = _punto_piu_vicino_su_triangolo(lotto[:, None, :], a[idx], b[idx], c[idx])
-        distanze[i : i + _LOTTO_PUNTI] = d.min(axis=1)
+    centroidi = (a + b + c) / 3.0
+    raggio = np.max([np.linalg.norm(x - centroidi, axis=1) for x in (a, b, c)], axis=0)
+    classe = np.maximum(np.frexp(raggio / (2.0 * np.median(raggio) or 1.0))[1], 0)
+    distanze = np.full(len(punti), np.inf)
+    for cl in np.unique(classe):
+        sel = np.flatnonzero(classe == cl)
+        albero, r_max = cKDTree(centroidi[sel]), raggio[sel].max()
+        attivi, k0, k = np.arange(len(punti)), 0, min(_CANDIDATI_PER_PUNTO, len(sel))
+        while len(attivi):
+            passo, ancora = max(1, _LOTTO_PUNTI * _CANDIDATI_PER_PUNTO // (k - k0)), []
+            for i in range(0, len(attivi), passo):
+                q = attivi[i : i + passo]
+                dc, idx = albero.query(punti[q], k=np.arange(k0 + 1, k + 1))
+                f = sel[idx]
+                d = _punto_piu_vicino_su_triangolo(punti[q][:, None, :], a[f], b[f], c[f]).min(axis=1)
+                distanze[q] = np.minimum(distanze[q], d)
+                ancora.append(q[dc[:, -1] - r_max < distanze[q]])
+            attivi = np.concatenate(ancora) if k < len(sel) else attivi[:0]
+            k0, k = k, min(2 * k, k + _LOTTO_PUNTI * _CANDIDATI_PER_PUNTO, len(sel))
     return distanze
 
 
@@ -351,12 +365,12 @@ def prepara_ingresso(
         # (decisione del 21/09/2026: sul caso reale il massimo viene dalle
         # cavita' piu' strette di alpha, che il wrap chiude per costruzione,
         # e col limite lo step falliva a ogni tolleranza).
-        # ponytail: passo = max(tol/5, spigolo mediano dell'ingresso). Stima su
-        # campioni: sotto passi grossi puo' sottostimare di qualche % (polo
-        # passante, sfera grossolana: 28,76 mm contro >= 30,38 veri). Il
-        # minimo toglie anche l'esplosione dei campioni con tolleranze
-        # minuscole; sul caso reale 121 s invece di 295 col massimo identico
-        # (28,58 mm). Serve una misura piu' fine: abbassare il minimo.
+        # ponytail: passo = max(tol/5, spigolo mediano dell'ingresso). Il
+        # massimo e' una stima per difetto sui campioni: a passi grossi perde
+        # qualche %. Il minimo evita anche l'esplosione dei campioni con
+        # tolleranze minuscole; su `geoandgeo-mm/08` (1,35 M facce, wrap
+        # 6,9 mm) la misura costa ~270 s (11/10/2026). Serve una misura piu'
+        # fine: abbassare il minimo.
         lati = np.linalg.norm(vertices[faces] - vertices[np.roll(faces, 1, axis=1)], axis=2)
         passo = max(cfg.wrap_tolerance / 5.0, float(np.median(lati)))
         distanza = spostamento(vertices, faces, wv, wf, passo_mm=passo)

@@ -72,18 +72,21 @@ def test_spostamento_e_deterministico():
     assert ai.spostamento(v, f, wv, wf) == ai.spostamento(v, f, wv, wf)
 
 
-def test_spostamento_non_sottostima_il_polo_passante():
+def test_spostamento_coglie_il_polo_passante():
     """Il campionamento Montecarlo di PyMeshLab (commit 64b6220, prima del fix
     round 2) aveva trovato punti fino a 30,38 mm su questa stessa coppia (9
     chiamate, 21/09/2026: 29,39-30,38). Lo spostamento vero e' quindi
     >= 30,38 mm: un campionamento fisso troppo rado (solo
-    vertici+baricentri+punti medi, ~21 mm) lo mancherebbe, e la tolleranza
-    deve essere un limite vero, non un'indicazione. `passo_mm` qui e' lo
-    stesso tol/5 che usa `prepara_ingresso` (vedi il suo commento: misurato
-    30,82 mm, sopra soglia)."""
+    vertici+baricentri+punti medi, ~21 mm) lo mancherebbe di 9 mm.
+
+    Il massimo e' la distanza esatta sui campioni della griglia, quindi una
+    stima per difetto del vero: a tol/5 (1 mm) vale 30,23 mm, a 0,5 mm 30,34,
+    a 0,25 mm 30,44 (misurati l'11/10/2026, #211). La soglia a 30,0 boccia il
+    campionamento rado senza chiedere alla griglia di raggiungere il valore
+    vero, che da sotto non garantisce."""
     v, f = _sfera((0.0, 0.0, -70.0))
     wv, wf, _ = ai.avvolgi(v, f, 5.0)
-    assert ai.spostamento(v, f, wv, wf, passo_mm=5.0 / 5.0)["max"] >= 30.38
+    assert ai.spostamento(v, f, wv, wf, passo_mm=5.0 / 5.0)["max"] >= 30.0
 
 
 # Le due righe segnalate dall'architect come scoperte dallo Step 1.
@@ -336,3 +339,129 @@ def test_nessun_campione_da_media_zero():
     vuoti_v, vuoti_f = np.empty((0, 3)), np.empty((0, 3), dtype=np.int64)
     massimo, media, distanze = ai._distanza_massima_e_media(vuoti_v, vuoti_f, 1.0, v, f)
     assert (massimo, media, len(distanze)) == (0.0, 0.0, 0)
+
+
+# Issue #211: la distanza punto-superficie deve essere esatta, non un limite
+# superiore dato dai soli 8 centroidi piu' vicini. Oracolo: forza bruta su tutte
+# le facce con la stessa proiezione esatta.
+
+
+def _forza_bruta(punti, v, f):
+    a, b, c = v[f[:, 0]], v[f[:, 1]], v[f[:, 2]]
+    return ai._punto_piu_vicino_su_triangolo(punti[:, None, :], a[None], b[None], c[None]).min(axis=1)
+
+
+def _grande_fra_piccoli():
+    """Un triangolo da 300 mm in z=0 (centroide a (100, 100, 0)) e una
+    griglia di triangoli da 1 mm in z=5 sopra il suo angolo: per i punti
+    vicini all'angolo, a 0,5 mm dal triangolo grande, gli 8 centroidi piu'
+    vicini sono tutti piccoli, a ~4,5 mm."""
+    v = [[0.0, 0.0, 0.0], [300.0, 0.0, 0.0], [0.0, 300.0, 0.0]]
+    f = [[0, 1, 2]]
+    for x in range(-5, 6):
+        for y in range(-5, 6):
+            i = len(v)
+            v += [[x, y, 5.0], [x + 1.0, y, 5.0], [x, y + 1.0, 5.0]]
+            f.append([i, i + 1, i + 2])
+    return np.array(v), np.array(f, dtype=np.int64)
+
+
+def test_la_faccia_piu_vicina_fuori_dagli_8_centroidi_si_trova():
+    v, f = _grande_fra_piccoli()
+    xy = np.stack(np.meshgrid(np.linspace(0.5, 3.0, 6), np.linspace(0.5, 3.0, 6)), axis=-1).reshape(-1, 2)
+    punti = np.column_stack([xy, np.full(len(xy), 0.5)])
+    vero = _forza_bruta(punti, v, f)
+    assert vero.max() == pytest.approx(0.5)
+    np.testing.assert_allclose(ai._distanza_punti_a_superficie(punti, v, f), vero, rtol=0, atol=1e-9)
+
+
+def test_distanza_di_nessun_punto_e_vuota():
+    v, f = _sfera()
+    assert len(ai._distanza_punti_a_superficie(np.empty((0, 3)), v, f)) == 0
+
+
+def test_distanza_verso_una_sola_faccia_e_esatta():
+    v = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0]])
+    f = np.array([[0, 1, 2]], dtype=np.int64)
+    punti = np.array([[1.0, 1.0, 3.0], [20.0, 0.0, 0.0], [-4.0, -3.0, 0.0]])
+    np.testing.assert_allclose(ai._distanza_punti_a_superficie(punti, v, f), [3.0, 10.0, 5.0], atol=1e-12)
+
+
+def test_triangoli_degeneri_danno_distanza_finita_ed_esatta():
+    v, f = _sfera()
+    n = len(v)
+    v = np.vstack([v, [[0.0, 0.0, 60.0], [10.0, 0.0, 60.0], [20.0, 0.0, 60.0], [5.0, 5.0, 70.0]]])
+    f = np.vstack([f, [[n, n + 1, n + 2], [n + 3, n + 3, n + 3]]])  # collineare, coincidente
+    rng = np.random.default_rng(0)
+    punti = rng.uniform(-80.0, 80.0, size=(500, 3))
+    d = ai._distanza_punti_a_superficie(punti, v, f)
+    assert np.isfinite(d).all()
+    np.testing.assert_allclose(d, _forza_bruta(punti, v, f), rtol=0, atol=1e-9)
+
+
+def test_un_triangolo_da_149_mm_fra_facce_da_35_non_alza_il_picco_di_memoria(monkeypatch):
+    """Le misure delle superfici reali di #211: lato mediano 35 mm, massimo
+    149. Punti fino a 100 mm dal piano, cosi' k deve crescere: ogni blocco
+    resta sotto `_LOTTO_PUNTI * _CANDIDATI_PER_PUNTO` coppie punto-faccia,
+    e il risultato resta quello della forza bruta."""
+    xs = np.arange(11) * 35.0
+    gx, gy = np.meshgrid(xs, xs, indexing="ij")
+    v = np.column_stack([gx.ravel(), gy.ravel(), np.zeros(gx.size)])
+    i = (np.arange(10)[:, None] * 11 + np.arange(10)[None, :]).ravel()
+    f = np.vstack([np.column_stack([i, i + 11, i + 1]), np.column_stack([i + 1, i + 11, i + 12])])
+    v = np.vstack([v, [[20.0, 20.0, 1.0], [169.0, 20.0, 1.0], [20.0, 169.0, 1.0]]])
+    f = np.vstack([f, [[len(v) - 3, len(v) - 2, len(v) - 1]]]).astype(np.int64)
+    punti = np.random.default_rng(1).uniform([-50.0, -50.0, -20.0], [400.0, 400.0, 100.0], size=(1000, 3))
+
+    monkeypatch.setattr(ai, "_LOTTO_PUNTI", 100)
+    tetto = ai._LOTTO_PUNTI * ai._CANDIDATI_PER_PUNTO
+    vera, blocchi = ai._punto_piu_vicino_su_triangolo, []
+
+    def contata(p, a, b, c):
+        blocchi.append(a.shape[0] * a.shape[1])
+        return vera(p, a, b, c)
+
+    monkeypatch.setattr(ai, "_punto_piu_vicino_su_triangolo", contata)
+    d = ai._distanza_punti_a_superficie(punti, v, f)
+    assert max(blocchi) <= tetto
+    np.testing.assert_allclose(d, _forza_bruta(punti, v, f), rtol=0, atol=1e-9)
+
+
+@pytest.mark.filterwarnings("error")
+def test_facce_tutte_di_raggio_zero_non_dividono_per_zero():
+    """Ogni faccia e' un punto: mediana di r_f = 0, la classe di taglia non
+    deve dividere per zero (RuntimeWarning reso errore)."""
+    v = np.random.default_rng(2).uniform(-10.0, 10.0, size=(20, 3))
+    f = np.repeat(np.arange(20)[:, None], 3, axis=1).astype(np.int64)
+    punti = np.random.default_rng(3).uniform(-15.0, 15.0, size=(50, 3))
+    np.testing.assert_allclose(ai._distanza_punti_a_superficie(punti, v, f), _forza_bruta(punti, v, f), rtol=0, atol=1e-9)
+
+
+def test_il_tetto_di_memoria_regge_quando_k_cresce_oltre_il_blocco(monkeypatch):
+    """Punti lontani da una griglia di facce uguali (una classe sola): k deve
+    arrivare a tutte le 800 facce. Raddoppiando, il salto di k supera da solo
+    il tetto di coppie per blocco; deve crescere a passi che ci stanno."""
+    xs = np.arange(21) * 10.0
+    gx, gy = np.meshgrid(xs, xs, indexing="ij")
+    v = np.column_stack([gx.ravel(), gy.ravel(), np.zeros(gx.size)])
+    i = (np.arange(20)[:, None] * 21 + np.arange(20)[None, :]).ravel()
+    f = np.vstack([np.column_stack([i, i + 21, i + 1]), np.column_stack([i + 1, i + 21, i + 22])]).astype(np.int64)
+    punti = np.array([[100.0, 100.0, 500.0], [0.0, 0.0, 300.0], [-200.0, 50.0, 400.0]])
+
+    monkeypatch.setattr(ai, "_LOTTO_PUNTI", 1)
+    tetto = ai._LOTTO_PUNTI * ai._CANDIDATI_PER_PUNTO
+    vera, blocchi = ai._punto_piu_vicino_su_triangolo, []
+
+    def contata(p, a, b, c):
+        blocchi.append(a.shape[0] * a.shape[1])
+        return vera(p, a, b, c)
+
+    monkeypatch.setattr(ai, "_punto_piu_vicino_su_triangolo", contata)
+    d = ai._distanza_punti_a_superficie(punti, v, f)
+    assert max(blocchi) <= tetto
+    np.testing.assert_allclose(d, _forza_bruta(punti, v, f), rtol=0, atol=1e-9)
+
+
+def test_distanza_verso_una_superficie_senza_facce_solleva():
+    with pytest.raises(ValueError, match="senza facce"):
+        ai._distanza_punti_a_superficie(np.zeros((3, 3)), np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64))
